@@ -52,6 +52,13 @@ linters:
       dot-import-whitelist:
       - github.com/onsi/ginkgo/v2
       - github.com/onsi/gomega
+    wrapcheck:
+      # Decorators behind the repo's own Fetcher seam (the disk cache,
+      # ADR-0002) must stay error-transparent: the inner Client's errors
+      # are already user-facing sentences, and rewrapping would break the
+      # transparent-delegation contract without adding context.
+      ignore-interface-regexps:
+      - ^data\.Fetcher$
 
 formatters:
   enable:
