@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# [MISE] description="Regenerate the giant fixture documents in internal/schema/testdata from the deterministic generator in test/giantcrd (no cluster needed)"
+# [MISE] dir="{{config_root}}"
+#
+# Deliberately uncached (no sources/outputs) to match the capture tasks:
+# regeneration is a deliberate act, and the fast loop's drift spec proves
+# the checked-in bytes match the generator either way.
+set -euo pipefail
+
+go run ./hack/generate-giant-fixture

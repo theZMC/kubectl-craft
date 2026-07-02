@@ -74,6 +74,28 @@ It boots a fresh k3s container (the same image the integration suite pins),
 installs the sample CRDs, waits for every corpus group-version to appear in the
 live `/openapi/v3` index, and rewrites the fixture files. Commit the result.
 
+One corpus member is generated, not captured: the **giant fixture**
+(`apis_giant.example.com_v1.json` / `_v2.json`), the huge-CRD perf pass's
+10k+-node group document. Real giant CRDs top out around ~2k schema nodes per
+Kind (prometheuses ≈ 2,000 at prometheus-operator v0.92.1), so the giant is
+built by the deterministic generator in `test/giantcrd` instead — deep nesting,
+wide sibling fans, big enums — and a fast-loop spec pins the checked-in bytes
+against the generator's output. Regenerate with (no Docker needed):
+
+```sh
+mise run fixtures:generate-giant
+```
+
+The perf specs themselves carry `Label("perf")`: they run in the fast loop
+(budgets are generous regression tripwires, not tight timings), and
+`ginkgo --label-filter='!perf'` excludes them if a noisy machine needs it. The
+precise numbers live in the benchmarks:
+
+```sh
+go test -bench=Giant -run='^$' ./internal/schema
+go test -bench=Keystroke -run='^$' ./internal/tui
+```
+
 ## Recorded Status corpus
 
 The hermetic Validate specs run against a checked-in corpus of dry-run failure

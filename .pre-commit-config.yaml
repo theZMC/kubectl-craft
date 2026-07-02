@@ -10,9 +10,10 @@ repos:
   - id: check-json
   # The fixture corpora are raw server bytes (DESIGN.md — Testing: the server
   # content hash describes raw content, and the recorded Status payloads are
-  # captured verbatim), so the fixing/size hooks must never touch them;
-  # regenerate with `mise run fixtures:capture` /
-  # `mise run fixtures:capture-status` instead.
+  # captured verbatim) or generator-pinned bytes (the giant fixture), so the
+  # fixing/size hooks must never touch them; regenerate with
+  # `mise run fixtures:capture` / `mise run fixtures:capture-status` /
+  # `mise run fixtures:generate-giant` instead.
   - id: end-of-file-fixer
     exclude: ^internal/(schema|validate)/testdata/.*\.json$
   - id: trailing-whitespace
