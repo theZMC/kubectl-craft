@@ -1,6 +1,11 @@
 [tools]
-go = "1.26.4"
+actionlint = "1.7.12"
+# Source the go version from go.mod (single source of truth). mise has no
+# native go.mod version-file support (jdx/mise#4136 — reverted on purpose),
+# so this uses the documented template mechanism instead. CI additionally
+# sets GOTOOLCHAIN=local so any resolution drift fails loudly.
+go = "{{ exec(command=\"awk '/^go /{print $2}' \" ~ config_root ~ \"/go.mod\") }}"
 pre-commit = "4.6.0"
 golangci-lint = "2.12.2"
-ginkgo = "2.29.0"
+ginkgo = "2.32.0"
 gofumpt = "0.10.0"

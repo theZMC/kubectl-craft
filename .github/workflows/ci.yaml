@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches:
+    - main
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  # mise resolves the go toolchain from go.mod; refuse silent auto-downloads
+  # of any other version so drift fails loudly.
+  GOTOOLCHAIN: local
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    # Installs the pinned toolchain (go, golangci-lint, ...) from
+    # .mise/config.toml and caches it.
+    - uses: jdx/mise-action@v4
+      with:
+        cache: true
+    - run: actionlint
+    - run: golangci-lint run ./...
+
+  fast:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: jdx/mise-action@v4
+      with:
+        cache: true
+    - name: Run the fast hermetic loop (no Docker)
+      run: go run github.com/onsi/ginkgo/v2/ginkgo --label-filter='!integration' ./...
+
+  integration:
+    # GitHub-hosted ubuntu runners ship with Docker, which the integration
+    # loop (testcontainers-go k3s) requires.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: jdx/mise-action@v4
+      with:
+        cache: true
+    - name: Run every suite, including integration specs
+      run: go run github.com/onsi/ginkgo/v2/ginkgo ./...
