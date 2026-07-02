@@ -22,9 +22,10 @@ const componentRefPrefix = "#/components/schemas/"
 // self-referential schema (JSONSchemaProps) simply yields another expandable
 // Node at every step instead of recursing.
 type Node struct {
-	doc    *Document
-	path   string       // schema-level Field Path; empty at the root
-	schema *spec.Schema // as written in the document, $refs unresolved
+	doc      *Document
+	path     string       // schema-level Field Path; empty at the root
+	schema   *spec.Schema // as written in the document, $refs unresolved
+	required bool         // the parent object's required list names this field
 }
 
 // FieldTree grows the field tree for a Kind from its root Type Schema. Only
@@ -58,7 +59,12 @@ func (n *Node) Children() ([]*Node, error) {
 	var children []*Node
 	for _, name := range slices.Sorted(maps.Keys(resolved.Properties)) {
 		property := resolved.Properties[name]
-		children = append(children, &Node{doc: n.doc, path: n.childPath(name), schema: &property})
+		children = append(children, &Node{
+			doc:      n.doc,
+			path:     n.childPath(name),
+			schema:   &property,
+			required: slices.Contains(resolved.Required, name),
+		})
 	}
 	if item := itemSchema(resolved); item != nil {
 		children = append(children, &Node{doc: n.doc, path: n.path, schema: item})
@@ -88,7 +94,12 @@ func (n *Node) Child(name string) (*Node, error) {
 		visited[resolved] = true
 
 		if property, defined := resolved.Properties[name]; defined {
-			return &Node{doc: n.doc, path: n.childPath(name), schema: &property}, nil
+			return &Node{
+				doc:      n.doc,
+				path:     n.childPath(name),
+				schema:   &property,
+				required: slices.Contains(resolved.Required, name),
+			}, nil
 		}
 		next := itemSchema(resolved)
 		if next == nil {
@@ -107,6 +118,20 @@ func (n *Node) Child(name string) (*Node, error) {
 // Resolution happens here — at expansion — never at tree construction, and a
 // $ref chain that never lands on a concrete schema errors instead of looping.
 func (n *Node) resolve(schema *spec.Schema) (*spec.Schema, error) {
+	chain, err := n.resolveChain(schema)
+	if err != nil {
+		return nil, err
+	}
+	return concreteSchema(chain), nil
+}
+
+// resolveChain resolves like resolve but keeps every schema visited along the
+// way, outermost-first: the fragment as written, any allOf wrappers, and the
+// concrete Type Schema fragment last. Metadata reads facets off the whole
+// chain, because a wrapper's description or default overrides the resolved
+// component schema's own.
+func (n *Node) resolveChain(schema *spec.Schema) ([]*spec.Schema, error) {
+	chain := []*spec.Schema{schema}
 	chased := map[string]bool{}
 	for {
 		if ref := schema.Ref.String(); ref != "" {
@@ -115,13 +140,15 @@ func (n *Node) resolve(schema *spec.Schema) (*spec.Schema, error) {
 				return nil, fmt.Errorf("expanding %s: %w", n.describe(), err)
 			}
 			schema = target
+			chain = append(chain, schema)
 			continue
 		}
 		if wrapped := allOfWrappedRef(schema); wrapped != nil {
 			schema = wrapped
+			chain = append(chain, schema)
 			continue
 		}
-		return schema, nil
+		return chain, nil
 	}
 }
 

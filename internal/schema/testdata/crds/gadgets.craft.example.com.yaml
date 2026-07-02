@@ -1,8 +1,10 @@
 # Sample CRD for the fixture corpus (DESIGN.md — Testing): a single-version
 # Kind whose Type Schema carries the known-nasty shapes the tree builder must
 # handle — int-or-string, x-kubernetes-preserve-unknown-fields (feeds the
-# raw-YAML escape hatch), and CEL rules (x-kubernetes-validations) at both the
-# object and scalar level. Installed into the capture cluster by
+# raw-YAML escape hatch), CEL rules (x-kubernetes-validations) at both the
+# object and scalar level, and the constraint keywords node metadata surfaces
+# (pattern, numeric bounds, length and item bounds, multipleOf, a declared
+# default). Installed into the capture cluster by
 # `mise run fixtures:capture` and captured as the apis/craft.example.com/v1
 # group document.
 apiVersion: apiextensions.k8s.io/v1
@@ -52,6 +54,30 @@ spec:
               profile:
                 type: string
                 description: Named performance profile for the gadget.
+                default: balanced
                 x-kubernetes-validations:
                 - rule: self in ['economy', 'balanced', 'performance']
                   message: profile must be economy, balanced, or performance
+              nickname:
+                type: string
+                description: Human-friendly gadget nickname, DNS-label style.
+                pattern: '^[a-z0-9]([-a-z0-9]*[a-z0-9])?$'
+                minLength: 1
+                maxLength: 63
+              efficiency:
+                type: number
+                description: Fraction of theoretical throughput the gadget sustains.
+                minimum: 0
+                exclusiveMinimum: true
+                maximum: 1
+              gears:
+                type: array
+                description: Ordered gear names the gadget cycles through.
+                minItems: 1
+                maxItems: 5
+                items:
+                  type: string
+              teeth:
+                type: integer
+                description: Tooth count per gear; always even.
+                multipleOf: 2

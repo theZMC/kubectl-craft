@@ -58,7 +58,9 @@ hooks are configured to leave them alone.
 
 The sample CRD manifests in `internal/schema/testdata/crds/` feed the corpus its
 known-nasty shapes: int-or-string, `x-kubernetes-preserve-unknown-fields`, CEL
-rules (`x-kubernetes-validations`), and a Kind served at two versions.
+rules (`x-kubernetes-validations`), the constraint keywords node metadata
+surfaces (pattern, numeric bounds, length and item bounds, multipleOf, a
+declared default), and a Kind served at two versions.
 
 Regenerate the whole corpus with one command (**requires a running Docker
 daemon**; the podman note above applies):
