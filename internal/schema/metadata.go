@@ -333,17 +333,22 @@ func renderEnum(values []any) []string {
 	}
 	rendered := make([]string, 0, len(values))
 	for _, value := range values {
-		if text, isString := value.(string); isString {
-			rendered = append(rendered, text)
-			continue
-		}
-		if encoded, err := json.Marshal(value); err == nil {
-			rendered = append(rendered, string(encoded))
-			continue
-		}
-		rendered = append(rendered, fmt.Sprint(value))
+		rendered = append(rendered, renderEnumValue(value))
 	}
 	return rendered
+}
+
+// renderEnumValue spells one value the way a Draft carries it: strings
+// verbatim, anything else in its JSON spelling — the spelling enum membership
+// is compared in, both at display and at set time.
+func renderEnumValue(value any) string {
+	if text, isString := value.(string); isString {
+		return text
+	}
+	if encoded, err := json.Marshal(value); err == nil {
+		return string(encoded)
+	}
+	return fmt.Sprint(value)
 }
 
 // renderNumber spells a numeric bound without exponent noise, marking
