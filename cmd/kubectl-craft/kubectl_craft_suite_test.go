@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
+	"github.com/thezmc/kubectl-craft/internal/tui"
 )
 
 func TestKubectlCraft(t *testing.T) {
@@ -21,7 +22,7 @@ var _ = Describe("the kubectl-craft binary", func() {
 	It("reports the build-time version via --version without starting a Session", func() {
 		out := &bytes.Buffer{}
 		launched := false
-		cmd := newRootCommand(func(context.Context, []data.Kind, data.Fetcher, []data.GroupVersion) error {
+		cmd := newRootCommand(func(context.Context, []data.Kind, data.Fetcher, []data.GroupVersion, *tui.DeepLink) error {
 			launched = true
 			return nil
 		})

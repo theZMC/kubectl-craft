@@ -123,7 +123,7 @@ func newShell() tui.Model {
 // newShellWith builds the Session shell around one specific Fetcher, for
 // specs that observe or fail its fetches.
 func newShellWith(fetcher data.Fetcher) tui.Model {
-	return tui.New(context.Background(), browsableKinds(), fetcher, corpusIndex())
+	return tui.New(context.Background(), browsableKinds(), fetcher, corpusIndex(), nil)
 }
 
 // composeKind builds one off-picker fixture Kind for driving the shell

@@ -18,6 +18,22 @@ type KindSelectedMsg struct {
 	Kind data.Kind
 }
 
+// DeepLink is the launch arg's resolved entry point (DESIGN.md — Flow §1:
+// the k9s-plugin integration hook): the Kind the Session opens on directly,
+// skipping the picker, and optionally a schema-level Field Path to land the
+// focus on. It is resolved before the alt screen opens — an unknown kind
+// token never reaches the shell.
+type DeepLink struct {
+	// Kind is the Kind the deep-linked Session opens on, already resolved
+	// to its Preferred Version.
+	Kind data.Kind
+
+	// FieldPath is the schema-level Field Path to land the focus on via
+	// the search overlay's landing rule; empty opens the Kind at the root
+	// of its field tree.
+	FieldPath string
+}
+
 // documentFetchedMsg delivers the parsed OpenAPI v3 group document a picker
 // selection asked for. The lazy fetch runs as a tea.Cmd so the shell stays
 // responsive in a loading state while the document travels and parses.
@@ -91,6 +107,11 @@ type Model struct {
 	fetchErr error
 	compose  compose
 
+	// pendingFieldPath is the deep link's deferred landing: the group
+	// document fetches asynchronously, so the Field Path jump applies when
+	// the document lands and the compose view opens — never at launch.
+	pendingFieldPath string
+
 	// width and height are the terminal size from the last
 	// tea.WindowSizeMsg, replayed onto views as they open.
 	width  int
@@ -99,27 +120,42 @@ type Model struct {
 
 // New builds the Session shell over what the Session resolved before the
 // alt screen opened: the browsable Kind list from discovery, the Fetcher
-// that sources group documents, and the live /openapi/v3 index whose
-// content hashes address every lazy fetch.
-func New(ctx context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion) Model {
+// that sources group documents, the live /openapi/v3 index whose content
+// hashes address every lazy fetch, and the launch arg's resolved deep link
+// when one was given — a deep-linked Session skips the picker and opens on
+// the linked Kind directly (nil launches on the picker as usual).
+func New(ctx context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion, link *DeepLink) Model {
 	contentHashes := make(map[string]string, len(index))
 	for _, group := range index {
 		contentHashes[group.Path] = group.ContentHash
 	}
 
-	return Model{
+	model := Model{
 		ctx:           ctx,
 		picker:        newPicker(kinds),
 		fetcher:       fetcher,
 		contentHashes: contentHashes,
 		documents:     map[string]*schema.Document{},
 	}
+
+	if link != nil {
+		model.view = fetchingDocument
+		model.kind = link.Kind
+		model.pendingFieldPath = link.FieldPath
+	}
+
+	return model
 }
 
-// Init starts the Session shell with no initial command: the live index
-// and the browsable Kind list are both resolved before the program
-// launches, so there is nothing to await.
-func (Model) Init() tea.Cmd {
+// Init starts the Session shell. Launching on the picker awaits nothing —
+// the live index and the browsable Kind list are both resolved before the
+// program starts. A deep-linked Session instead starts in the loading
+// state, fetching the linked Kind's group document exactly as a picker
+// selection would.
+func (m Model) Init() tea.Cmd {
+	if m.view == fetchingDocument {
+		return m.fetchDocumentCmd(m.kind)
+	}
 	return nil
 }
 
@@ -212,7 +248,9 @@ func (m Model) documentFetchFailed(msg documentFetchFailedMsg) (tea.Model, tea.C
 
 // openCompose grows the compose view from the parsed group document; a
 // document that cannot serve the Kind (no Type Schema, an unexpandable
-// root) lands in the in-TUI error state instead.
+// root) lands in the in-TUI error state instead. The deep link's deferred
+// Field Path landing applies here — the first time the linked Kind's
+// document lands — and never again.
 func (m Model) openCompose(document *schema.Document) Model {
 	view, err := newCompose(m.kind, document)
 	if err != nil {
@@ -221,19 +259,26 @@ func (m Model) openCompose(document *schema.Document) Model {
 		return m
 	}
 
+	if m.pendingFieldPath != "" {
+		view = view.landDeepLink(m.pendingFieldPath)
+		m.pendingFieldPath = ""
+	}
+
 	m.compose = view.resize(m.width, m.height)
 	m.view = composing
 	m.fetchErr = nil
 	return m
 }
 
-// returnToPicker reopens the Kind picker, dropping the selection state; a
-// still-in-flight fetch resolves into the document memo and nothing more.
+// returnToPicker reopens the Kind picker, dropping the selection state —
+// an unapplied deep-link landing included; a still-in-flight fetch
+// resolves into the document memo and nothing more.
 func (m Model) returnToPicker() Model {
 	m.view = pickingKind
 	m.kind = data.Kind{}
 	m.fetchErr = nil
 	m.compose = compose{}
+	m.pendingFieldPath = ""
 	return m
 }
 
@@ -426,6 +471,15 @@ func (m Model) HighlightedSearchMatch() (SearchMatch, bool) {
 		return SearchMatch{}, false
 	}
 	return m.compose.search.highlighted()
+}
+
+// Notice returns the compose view's non-fatal notice — a deep-link Field
+// Path the Type Schema doesn't define — and false when none is showing.
+func (m Model) Notice() (string, bool) {
+	if m.view != composing || m.compose.notice == "" {
+		return "", false
+	}
+	return m.compose.notice, true
 }
 
 // MissingRequiredFieldPaths returns the required-but-unset Field Paths the

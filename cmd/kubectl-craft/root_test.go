@@ -14,18 +14,22 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
+	"github.com/thezmc/kubectl-craft/internal/tui"
 )
 
 // noShell is the sessionShell for specs that never reach a launch.
-func noShell(context.Context, []data.Kind, data.Fetcher, []data.GroupVersion) error { return nil }
+func noShell(context.Context, []data.Kind, data.Fetcher, []data.GroupVersion, *tui.DeepLink) error {
+	return nil
+}
 
 // launch records everything one Session shell launch received: the
-// discovered Kind list, the Fetcher sourcing group documents, and the
-// live /openapi/v3 index.
+// discovered Kind list, the Fetcher sourcing group documents, the live
+// /openapi/v3 index, and the resolved deep link (nil for a bare launch).
 type launch struct {
 	kinds   []data.Kind
 	fetcher data.Fetcher
 	index   []data.GroupVersion
+	link    *tui.DeepLink
 }
 
 // writeKubeconfig writes a kubeconfig whose fixed context points at the
@@ -109,19 +113,20 @@ func craftableClusterMux() *http.ServeMux {
 }
 
 // executeSession runs the root command against the given kubeconfig with a
-// recording sessionShell, mirroring one Session launch. It returns whatever
-// the process wrote to the real stdout during execution, everything the
-// shell was launched with, and the execution error.
-func executeSession(kubeconfig string) (string, []launch, error) {
+// recording sessionShell, mirroring one Session launch — extra args ride
+// along as the command line's positional args. It returns whatever the
+// process wrote to the real stdout during execution, everything the shell
+// was launched with, and the execution error.
+func executeSession(kubeconfig string, args ...string) (string, []launch, error) {
 	GinkgoHelper()
 	var launches []launch
-	shell := func(_ context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion) error {
-		launches = append(launches, launch{kinds: kinds, fetcher: fetcher, index: index})
+	shell := func(_ context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion, link *tui.DeepLink) error {
+		launches = append(launches, launch{kinds: kinds, fetcher: fetcher, index: index, link: link})
 		return nil
 	}
 	cmd := newRootCommand(shell)
 	cmd.SetErr(io.Discard)
-	cmd.SetArgs([]string{"--kubeconfig", kubeconfig})
+	cmd.SetArgs(append([]string{"--kubeconfig", kubeconfig}, args...))
 
 	stdout, err := captureStdout(func() error {
 		cmd.SetOut(os.Stdout)
@@ -153,16 +158,20 @@ var _ = Describe("the root command", func() {
 				data.Kind{
 					GVK:              schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"},
 					GroupVersionPath: "api/v1",
+					Plural:           "configmaps",
 					ShortNames:       []string{"cm"},
 					Preferred:        true,
 				},
 				data.Kind{
 					GVK:              schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
 					GroupVersionPath: "apis/apps/v1",
+					Plural:           "deployments",
 					ShortNames:       []string{"deploy"},
 					Preferred:        true,
 				},
-			), "the shell receives every create-capable Kind with its GVK, Document path, short names, and Preferred marking")
+			), "the shell receives every create-capable Kind with its GVK, Document path, plural, short names, and Preferred marking")
+			Expect(launches[0].link).To(BeNil(),
+				"a bare launch carries no deep link — the shell opens on the Kind picker")
 			Expect(launches[0].fetcher).To(BeAssignableToTypeOf(&data.Cache{}),
 				"production wiring hands the shell the hash-validated disk cache over the live client (ADR-0002), "+
 					"so lazy group-document fetches warm and reuse it transparently")
@@ -172,6 +181,73 @@ var _ = Describe("the root command", func() {
 			), "the shell receives the live index so every lazy fetch is addressed by its server content hash")
 			Expect(out).To(BeEmpty(),
 				"the command path must write nothing to the process stdout — it is reserved for the Emitted Manifest")
+		})
+	})
+
+	When("the positional deep-link arg names a Kind", func() {
+		It("documents the kubectl-explain syntax in the command's help surfaces", func() {
+			cmd := newRootCommand(noShell)
+
+			Expect(cmd.Use).To(ContainSubstring("[kind[.field.path]]"))
+			Expect(cmd.Example).To(ContainSubstring("kubectl craft deploy"),
+				"the examples must show the kind-only deep link")
+			Expect(cmd.Example).To(ContainSubstring("kubectl craft deploy.spec.strategy"),
+				"the examples must show the Field Path deep link")
+		})
+
+		It("resolves a short name through discovery and launches the shell deep-linked to the Kind", func() {
+			server := httptest.NewServer(craftableClusterMux())
+			DeferCleanup(server.Close)
+
+			out, launches, err := executeSession(writeKubeconfig(server.URL), "deploy")
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(launches).To(HaveLen(1))
+			Expect(launches[0].link).NotTo(BeNil())
+			Expect(launches[0].link.Kind.GVK).To(Equal(
+				schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+			),
+				"deploy must resolve to apps/v1 Deployment at the Preferred Version")
+			Expect(launches[0].link.FieldPath).To(BeEmpty(),
+				"a kind-only arg deep-links to the Kind's root")
+			Expect(out).To(BeEmpty())
+		})
+
+		It("carries everything after the first dot as the schema-level Field Path", func() {
+			server := httptest.NewServer(craftableClusterMux())
+			DeferCleanup(server.Close)
+
+			_, launches, err := executeSession(writeKubeconfig(server.URL), "deploy.spec.strategy")
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(launches).To(HaveLen(1))
+			Expect(launches[0].link).NotTo(BeNil())
+			Expect(launches[0].link.Kind.GVK.Kind).To(Equal("Deployment"))
+			Expect(launches[0].link.FieldPath).To(Equal("spec.strategy"),
+				"only the first dot-segment is the kind token; the rest is the Field Path")
+		})
+
+		It("hard-fails on an unknown kind token, naming it, before the alt screen ever opens", func() {
+			server := httptest.NewServer(craftableClusterMux())
+			DeferCleanup(server.Close)
+
+			out, launches, err := executeSession(writeKubeconfig(server.URL), "gizmo.spec")
+
+			Expect(err).To(MatchError(ContainSubstring(`unknown kind "gizmo"`)),
+				"the pre-flight failure must name the token that failed to resolve")
+			Expect(launches).To(BeEmpty(),
+				"an unresolvable deep link must surface before the Session shell ever starts")
+			Expect(out).To(BeEmpty())
+		})
+
+		It("rejects a second positional arg", func() {
+			server := httptest.NewServer(craftableClusterMux())
+			DeferCleanup(server.Close)
+
+			_, launches, err := executeSession(writeKubeconfig(server.URL), "deploy", "pod")
+
+			Expect(err).To(HaveOccurred())
+			Expect(launches).To(BeEmpty())
 		})
 	})
 

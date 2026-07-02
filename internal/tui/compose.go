@@ -129,6 +129,11 @@ type compose struct {
 	// overlay's first open.
 	searchOpen bool
 	search     fieldSearch
+
+	// notice is the non-fatal one-liner a deep link leaves when its Field
+	// Path doesn't exist in the Type Schema: it takes the hint bar's line
+	// until the first key press — the Kind stays browsable throughout.
+	notice string
 }
 
 // newCompose grows the compose view for a Kind from its parsed group
@@ -275,6 +280,11 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 		// even through the help overlay (DESIGN.md — Exit ramp).
 		return c, tea.Quit
 	}
+
+	// Any key acknowledges the deep link's non-fatal notice: the hint bar
+	// returns as soon as browsing starts.
+	c.notice = ""
+
 	if c.helpOpen {
 		c.helpOpen = false
 		return c, nil
@@ -512,11 +522,20 @@ func (c compose) breadcrumb() string {
 }
 
 // view renders the compose view: breadcrumb, tree + detail panes (or the
-// help overlay), and the contextual hint bar.
+// help overlay), and the footer line.
 func (c compose) view() string {
 	return clipLine(c.breadcrumb(), c.width) + "\n" +
 		c.bodyView() + "\n" +
-		clipLine(dimmedStyle.Render(c.hints()), c.width) + "\n"
+		clipLine(c.footer(), c.width) + "\n"
+}
+
+// footer is the view's bottom line: the deep link's non-fatal notice until
+// the first key press, the contextual hint bar otherwise.
+func (c compose) footer() string {
+	if c.notice != "" {
+		return highlightedStyle.Render(c.notice)
+	}
+	return dimmedStyle.Render(c.hints())
 }
 
 // hints is the contextual one-line hint bar: the search overlay's own hint

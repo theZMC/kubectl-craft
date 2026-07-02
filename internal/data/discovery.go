@@ -25,6 +25,11 @@ type Kind struct {
 	// "apis/<group>/<version>" otherwise.
 	GroupVersionPath string
 
+	// Plural is the resource's plural name exactly as discovery serves it
+	// (e.g. "deployments" for Deployment); the deep-link arg resolves
+	// through it alongside the Kind name and short names.
+	Plural string
+
 	// ShortNames are the resource's short names as served by discovery
 	// (e.g. "deploy" for Deployment); the deep-link arg resolves through
 	// them.
@@ -140,6 +145,7 @@ func browsableKind(listGV schema.GroupVersion, resource metav1.APIResource, pref
 	return Kind{
 		GVK:              gvk,
 		GroupVersionPath: groupVersionPath(gvk.GroupVersion()),
+		Plural:           resource.Name,
 		ShortNames:       slices.Clone(resource.ShortNames),
 		Preferred:        preferred[gvk.Group] == gvk.Version,
 	}

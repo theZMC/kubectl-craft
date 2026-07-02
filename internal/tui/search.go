@@ -303,6 +303,28 @@ func highlightMatched(match SearchMatch) string {
 	return view.String()
 }
 
+// landDeepLink applies the launch arg's Field Path over a freshly opened
+// compose view: a path the Type Schema defines lands under the search
+// overlay's landing rule — ancestors expanded, array/map crossings landing
+// per the rule — and a path it doesn't define leaves the view at the root
+// with a non-fatal notice, keeping the Kind browsable either way. The
+// existence check runs over the same candidate set the `/` search
+// enumerates, which stays memoized for the overlay's first open.
+func (c compose) landDeepLink(fieldPath string) compose {
+	if c.search.candidates == nil {
+		c.search.candidates = c.root.node.FieldPaths()
+	}
+
+	if !slices.Contains(c.search.candidates, fieldPath) {
+		c.notice = "no Field Path " + fieldPath + " in " + kindDisplayName(c.kind) +
+			"'s Type Schema — opened at the root"
+		return c
+	}
+
+	c.landOn(fieldPath)
+	return c
+}
+
 // landOn is the field search's landing rule (DESIGN.md — Flow §5): expand
 // every ancestor along the match's schema-level Field Path and move the
 // focus to the match. When the path crosses an array or a map, the jump

@@ -47,7 +47,7 @@ var _ = Describe("the Session shell against a live k3s cluster", func() {
 		}
 		Expect(found).To(BeTrue(), "discovery must offer apps/v1 Deployment")
 
-		model := tui.New(ctx, kinds, client, index)
+		model := tui.New(ctx, kinds, client, index, nil)
 
 		updated, cmd := model.Update(tui.KindSelectedMsg{Kind: deployment})
 		model = updated.(tui.Model)

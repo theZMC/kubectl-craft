@@ -96,24 +96,28 @@ var _ = Describe("discovering the cluster's browsable Kinds", func() {
 				{
 					GVK:              schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"},
 					GroupVersionPath: "api/v1",
+					Plural:           "configmaps",
 					ShortNames:       []string{"cm"},
 					Preferred:        true,
 				},
 				{
 					GVK:              schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
 					GroupVersionPath: "apis/apps/v1",
+					Plural:           "deployments",
 					ShortNames:       []string{"deploy"},
 					Preferred:        true,
 				},
 				{
 					GVK:              schema.GroupVersionKind{Group: "craft.example.com", Version: "v1", Kind: "Widget"},
 					GroupVersionPath: "apis/craft.example.com/v1",
+					Plural:           "widgets",
 					ShortNames:       []string{"wgt"},
 					Preferred:        false,
 				},
 				{
 					GVK:              schema.GroupVersionKind{Group: "craft.example.com", Version: "v2", Kind: "Widget"},
 					GroupVersionPath: "apis/craft.example.com/v2",
+					Plural:           "widgets",
 					ShortNames:       []string{"wgt"},
 					Preferred:        true,
 				},
