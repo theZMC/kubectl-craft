@@ -1,0 +1,1 @@
+{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"admission webhook \"deny.craft.example.com\" denied the request: the kubectl-craft capture webhook denies every matching Manifest","code":400}

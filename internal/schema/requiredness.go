@@ -253,6 +253,16 @@ type draftSegment struct {
 	key   string
 }
 
+// ParseDraftPath parses a Draft-level Field Path, reporting a malformed one
+// as an error naming the malformation. It is the grammar's shared authority:
+// Validate's tree-mapping (internal/validate) normalizes the server's
+// error-cause paths into this grammar, and this parser is what proves each
+// normalized Field Path landed in it.
+func ParseDraftPath(path string) error {
+	_, err := splitDraftPath(path)
+	return err
+}
+
 // splitDraftPath parses a Draft-level Field Path — dotted field names with
 // bracket selectors for items and keys, e.g.
 // spec.template.spec.containers[0].name or metadata.labels["app"] — into its

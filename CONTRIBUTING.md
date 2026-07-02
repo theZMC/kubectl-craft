@@ -7,6 +7,7 @@ ______________________________________________________________________
 - [Toolchain](#toolchain)
 - [Test loops](#test-loops)
 - [Fixture corpus](#fixture-corpus)
+- [Recorded Status corpus](#recorded-status-corpus)
 
 ______________________________________________________________________
 
@@ -72,3 +73,31 @@ mise run fixtures:capture
 It boots a fresh k3s container (the same image the integration suite pins),
 installs the sample CRDs, waits for every corpus group-version to appear in the
 live `/openapi/v3` index, and rewrites the fixture files. Commit the result.
+
+## Recorded Status corpus
+
+The hermetic Validate specs run against a checked-in corpus of dry-run failure
+payloads in `internal/validate/testdata/`: the raw `metav1.Status` bodies a real
+API server answered with when deliberately-invalid Manifests were POSTed with
+`?dryRun=All`. Like the OpenAPI corpus, the fixtures are the **raw response
+bytes** exactly as the cluster served them — never pretty-printed or
+re-marshalled — and the pre-commit fixer hooks leave them alone.
+
+The scenarios are declared in `hack/capture-status-fixtures`: a required-field
+violation (apps/v1 Deployment), a CEL rule violation (the sample Gadget CRD's
+`x-kubernetes-validations`), an enum violation on an indexed path plus a map-key
+path (v1 Pod), and a webhook denial. The denial is recorded from a real
+always-deny `ValidatingWebhookConfiguration`: the capture tool serves an
+in-process HTTPS admission server on the host and the cluster reaches it through
+testcontainers' host port access (`host.testcontainers.internal`).
+
+Regenerate the whole corpus with one command (**requires a running Docker
+daemon**; the podman note above applies):
+
+```sh
+mise run fixtures:capture-status
+```
+
+It boots a fresh k3s container (the same image the integration suite pins),
+installs the sample CRDs, registers the always-deny webhook, POSTs each scenario
+Manifest with `?dryRun=All`, and rewrites the fixture files. Commit the result.

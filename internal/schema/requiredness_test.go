@@ -218,6 +218,31 @@ var _ = Describe("contextual requiredness", func() {
 		)
 	})
 
+	When("a Draft-level Field Path is checked against the shared grammar", func() {
+		DescribeTable(
+			"a well-formed path parses",
+			func(path string) {
+				Expect(schema.ParseDraftPath(path)).To(Succeed())
+			},
+			Entry("a single field", "spec"),
+			Entry("a dotted chain", "spec.template.spec.restartPolicy"),
+			Entry("an item index", "spec.template.spec.containers[0].name"),
+			Entry("a double-quoted map key", `metadata.labels["app.kubernetes.io/name"]`),
+			Entry("selectors chained through each other", `spec.tuning["knobs"][0].value`),
+		)
+
+		DescribeTable(
+			"a malformed path is rejected with the malformation named",
+			func(path, complaint string) {
+				Expect(schema.ParseDraftPath(path)).To(MatchError(ContainSubstring(complaint)))
+			},
+			Entry("the empty path", "", "expected a field name"),
+			Entry("an unquoted map key", "metadata.labels[app]",
+				"neither an item index nor a quoted map key"),
+			Entry("an unclosed selector", "spec.gears[0", "missing its closing ']'"),
+		)
+	})
+
 	When("an instantiated Draft-level Field Path is malformed", func() {
 		DescribeTable(
 			"the path is rejected with the malformation named",
