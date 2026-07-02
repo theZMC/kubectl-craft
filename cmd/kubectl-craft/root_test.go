@@ -17,7 +17,16 @@ import (
 )
 
 // noShell is the sessionShell for specs that never reach a launch.
-func noShell(context.Context, []data.Kind) error { return nil }
+func noShell(context.Context, []data.Kind, data.Fetcher, []data.GroupVersion) error { return nil }
+
+// launch records everything one Session shell launch received: the
+// discovered Kind list, the Fetcher sourcing group documents, and the
+// live /openapi/v3 index.
+type launch struct {
+	kinds   []data.Kind
+	fetcher data.Fetcher
+	index   []data.GroupVersion
+}
 
 // writeKubeconfig writes a kubeconfig whose fixed context points at the
 // given server, the way a Session binds to one cluster at invocation.
@@ -101,13 +110,13 @@ func craftableClusterMux() *http.ServeMux {
 
 // executeSession runs the root command against the given kubeconfig with a
 // recording sessionShell, mirroring one Session launch. It returns whatever
-// the process wrote to the real stdout during execution, the Kind lists
-// the shell was launched with, and the execution error.
-func executeSession(kubeconfig string) (string, [][]data.Kind, error) {
+// the process wrote to the real stdout during execution, everything the
+// shell was launched with, and the execution error.
+func executeSession(kubeconfig string) (string, []launch, error) {
 	GinkgoHelper()
-	var launches [][]data.Kind
-	shell := func(_ context.Context, kinds []data.Kind) error {
-		launches = append(launches, kinds)
+	var launches []launch
+	shell := func(_ context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion) error {
+		launches = append(launches, launch{kinds: kinds, fetcher: fetcher, index: index})
 		return nil
 	}
 	cmd := newRootCommand(shell)
@@ -140,7 +149,7 @@ var _ = Describe("the root command", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(launches).To(HaveLen(1),
 				"the shell must launch exactly once, with the Kind list resolved before the alt screen opens")
-			Expect(launches[0]).To(ConsistOf(
+			Expect(launches[0].kinds).To(ConsistOf(
 				data.Kind{
 					GVK:              schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"},
 					GroupVersionPath: "api/v1",
@@ -154,6 +163,13 @@ var _ = Describe("the root command", func() {
 					Preferred:        true,
 				},
 			), "the shell receives every create-capable Kind with its GVK, Document path, short names, and Preferred marking")
+			Expect(launches[0].fetcher).To(BeAssignableToTypeOf(&data.Cache{}),
+				"production wiring hands the shell the hash-validated disk cache over the live client (ADR-0002), "+
+					"so lazy group-document fetches warm and reuse it transparently")
+			Expect(launches[0].index).To(ConsistOf(
+				data.GroupVersion{Path: "api/v1", ContentHash: "CORE1HASH"},
+				data.GroupVersion{Path: "apis/apps/v1", ContentHash: "APPS1HASH"},
+			), "the shell receives the live index so every lazy fetch is addressed by its server content hash")
 			Expect(out).To(BeEmpty(),
 				"the command path must write nothing to the process stdout — it is reserved for the Emitted Manifest")
 		})

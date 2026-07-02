@@ -105,11 +105,11 @@ func kindNames(kinds []data.Kind) []string {
 var _ = Describe("the Session shell", func() {
 	When("the Session opens on the Kind picker", func() {
 		It("starts with no initial command — Kinds are discovered before launch", func() {
-			Expect(tui.New(browsableKinds()).Init()).To(BeNil())
+			Expect(newShell().Init()).To(BeNil())
 		})
 
 		It("lists every browsable Kind with each Kind's versions together, Preferred Version first", func() {
-			model := tui.New(browsableKinds())
+			model := newShell()
 
 			Expect(kindNames(model.MatchedKinds())).To(Equal([]string{
 				"ConfigMap", "Pod",
@@ -127,7 +127,7 @@ var _ = Describe("the Session shell", func() {
 		})
 
 		It("highlights the first row and renders group/version as row metadata", func() {
-			model := tui.New(browsableKinds())
+			model := newShell()
 
 			highlighted, ok := model.HighlightedKind()
 			Expect(ok).To(BeTrue())
@@ -142,21 +142,21 @@ var _ = Describe("the Session shell", func() {
 
 	When("printable keys type into the filter", func() {
 		It("narrows immediately, fuzzy-matching on the kind name", func() {
-			model := typeFilter(tui.New(browsableKinds()), "dply")
+			model := typeFilter(newShell(), "dply")
 
 			Expect(model.Filter()).To(Equal("dply"))
 			Expect(kindNames(model.MatchedKinds())).To(Equal([]string{"Deployment"}))
 		})
 
 		It("matches short names, so the filter reaches a Kind the way the deep-link arg would", func() {
-			model := typeFilter(tui.New(browsableKinds()), "gz")
+			model := typeFilter(newShell(), "gz")
 
 			Expect(kindNames(model.MatchedKinds())).To(Equal([]string{"Gadget"}),
 				"gz is not a subsequence of Gadget — only the short name can match")
 		})
 
 		It("re-anchors the selection on the narrowed list's first row", func() {
-			model, _ := press(tui.New(browsableKinds()), tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyDown})
+			model, _ := press(newShell(), tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyDown})
 			model = typeFilter(model, "hpa")
 
 			highlighted, ok := model.HighlightedKind()
@@ -166,7 +166,7 @@ var _ = Describe("the Session shell", func() {
 		})
 
 		It("re-widens one keystroke at a time as backspace erases the filter", func() {
-			model := typeFilter(tui.New(browsableKinds()), "gz")
+			model := typeFilter(newShell(), "gz")
 
 			model, _ = press(model, tea.KeyMsg{Type: tea.KeyBackspace})
 			Expect(model.Filter()).To(Equal("g"))
@@ -179,7 +179,7 @@ var _ = Describe("the Session shell", func() {
 		})
 
 		It("keeps a no-match filter harmless: Enter selects nothing and the view stays up", func() {
-			model := typeFilter(tui.New(browsableKinds()), "zzz")
+			model := typeFilter(newShell(), "zzz")
 
 			Expect(model.MatchedKinds()).To(BeEmpty())
 			_, ok := model.HighlightedKind()
@@ -197,7 +197,7 @@ var _ = Describe("the Session shell", func() {
 		DescribeTable(
 			"movement keys slide the highlight and clamp at the edges",
 			func(down, up tea.KeyMsg) {
-				model := tui.New(browsableKinds())
+				model := newShell()
 				rowCount := len(model.MatchedKinds())
 
 				model, _ = press(model, up)
@@ -225,7 +225,7 @@ var _ = Describe("the Session shell", func() {
 
 	When("Enter selects the highlighted Kind", func() {
 		It("emits the typed handoff carrying the GVK and group-version path", func() {
-			model := typeFilter(tui.New(browsableKinds()), "deploy")
+			model := typeFilter(newShell(), "deploy")
 
 			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
 			Expect(cmd).NotTo(BeNil())
@@ -239,29 +239,33 @@ var _ = Describe("the Session shell", func() {
 				"the transition happens when the shell consumes the message, not on the key itself")
 		})
 
-		It("transitions the shell into the compose placeholder when the handoff lands", func() {
-			model := typeFilter(tui.New(browsableKinds()), "deploy")
+		It("consumes the handoff by lazily fetching the Kind's group document, then opens the compose view", func() {
+			model := typeFilter(newShell(), "deploy")
 			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
 
-			model, _ = press(model, cmd())
+			model, fetch := press(model, cmd())
 
 			selected, ok := model.SelectedKind()
 			Expect(ok).To(BeTrue())
 			Expect(selected).To(Equal(kindNamed("Deployment", "v1")))
-			Expect(model.View()).To(ContainSubstring("composing Deployment (apps/v1)"))
+			Expect(model.FetchingDocument()).To(BeTrue(),
+				"the group document fetch runs as a command, so the shell shows a loading state meanwhile")
+			Expect(fetch).NotTo(BeNil())
+
+			model, _ = press(model, fetch())
+			Expect(model.ComposeOpen()).To(BeTrue(),
+				"the fetched group document opens the compose view on the selected Kind")
 		})
 
 		DescribeTable(
-			"the placeholder keeps the empty-Draft exit grammar",
+			"the compose view keeps the empty-Draft exit grammar",
 			func(key tea.KeyMsg) {
-				model := typeFilter(tui.New(browsableKinds()), "deploy")
-				model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
-				model, _ = press(model, cmd())
+				model := composeDeployment()
 
 				_, quit := press(model, key)
 				Expect(quit).NotTo(BeNil())
 				Expect(quit()).To(Equal(tea.QuitMsg{}),
-					"the Draft is still always empty, so quitting needs no prompt")
+					"the Draft is still always empty in M2, so quitting needs no prompt")
 			},
 			Entry("q — the empty-Draft rule",
 				tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}),
@@ -272,7 +276,7 @@ var _ = Describe("the Session shell", func() {
 
 	When("Esc dismisses the picker", func() {
 		It("clears first, then dismisses: an active filter absorbs the first Esc", func() {
-			model := typeFilter(tui.New(browsableKinds()), "hpa")
+			model := typeFilter(newShell(), "hpa")
 
 			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEsc})
 			Expect(cmd).To(BeNil(),
@@ -288,7 +292,7 @@ var _ = Describe("the Session shell", func() {
 		})
 
 		It("lets Ctrl-c quit immediately even while a filter is active", func() {
-			model := typeFilter(tui.New(browsableKinds()), "hpa")
+			model := typeFilter(newShell(), "hpa")
 
 			_, quit := press(model, tea.KeyMsg{Type: tea.KeyCtrlC})
 			Expect(quit).NotTo(BeNil())
@@ -296,7 +300,7 @@ var _ = Describe("the Session shell", func() {
 		})
 
 		It("treats q as a filter key, not an exit verb — the picker is a search surface", func() {
-			model, cmd := press(tui.New(browsableKinds()), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+			model, cmd := press(newShell(), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 
 			Expect(cmd).To(BeNil())
 			Expect(model.Filter()).To(Equal("q"))
@@ -305,7 +309,7 @@ var _ = Describe("the Session shell", func() {
 
 	When("the terminal window sizes the picker's viewport", func() {
 		It("scrolls the list with the selection", func() {
-			model, _ := press(tui.New(browsableKinds()), tea.WindowSizeMsg{Width: 60, Height: 4})
+			model, _ := press(newShell(), tea.WindowSizeMsg{Width: 60, Height: 4})
 
 			Expect(model.View()).To(ContainSubstring("ConfigMap"))
 			Expect(model.View()).NotTo(ContainSubstring("Gadget"),
@@ -331,7 +335,7 @@ var _ = Describe("the Session shell", func() {
 		DescribeTable(
 			"tiny terminals never crash the picker",
 			func(size tea.WindowSizeMsg) {
-				model, _ := press(tui.New(browsableKinds()), size)
+				model, _ := press(newShell(), size)
 
 				Expect(model.View()).To(ContainSubstring(">"),
 					"the filter prompt is the last thing to give up")

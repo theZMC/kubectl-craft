@@ -11,7 +11,10 @@ import (
 )
 
 // Run launches the Session shell as an alt-screen Bubble Tea program on
-// the controlling terminal and blocks until the Session ends.
+// the controlling terminal and blocks until the Session ends. The shell
+// opens on the Kind picker over the discovered Kind list; the Fetcher and
+// the live /openapi/v3 index feed the compose view's lazy group-document
+// fetches once a Kind is picked.
 //
 // The clean-stdout contract (DESIGN.md — Output): the TUI renders to
 // /dev/tty, never stdout — stdout carries nothing but the Emitted
@@ -22,7 +25,7 @@ import (
 // Without a controlling terminal (for example, a non-interactive CI job),
 // opening /dev/tty fails and Run returns before any program starts; the
 // caller surfaces that on stderr as a non-zero exit.
-func Run(ctx context.Context, kinds []data.Kind) error {
+func Run(ctx context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion) error {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf(
@@ -32,7 +35,7 @@ func Run(ctx context.Context, kinds []data.Kind) error {
 	defer func() { _ = tty.Close() }()
 
 	program := tea.NewProgram(
-		New(kinds),
+		New(ctx, kinds, fetcher, index),
 		tea.WithContext(ctx),
 		tea.WithAltScreen(),
 		tea.WithInput(tty),
