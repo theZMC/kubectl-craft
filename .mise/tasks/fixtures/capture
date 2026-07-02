@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# [MISE] description="Regenerate the raw OpenAPI v3 fixture corpus in internal/schema/testdata from a fresh k3s container (requires Docker)"
+# [MISE] dir="{{config_root}}"
+#
+# Deliberately uncached (no sources/outputs): regeneration must always talk to
+# a real cluster — the fixtures are raw server bytes, and only the server can
+# say what they are. See CONTRIBUTING.md — Fixture corpus.
+set -euo pipefail
+
+go run ./hack/capture-fixtures

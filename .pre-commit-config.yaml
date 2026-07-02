@@ -8,11 +8,17 @@ repos:
     - --unsafe
   - id: check-toml
   - id: check-json
+  # The fixture corpus is raw server bytes (DESIGN.md — Testing: the server
+  # content hash describes raw content), so the fixing/size hooks must never
+  # touch it; regenerate with `mise run fixtures:capture` instead.
   - id: end-of-file-fixer
+    exclude: ^internal/schema/testdata/.*\.json$
   - id: trailing-whitespace
+    exclude: ^internal/schema/testdata/.*\.json$
   - id: check-added-large-files
     args:
     - --maxkb=500
+    exclude: ^internal/schema/testdata/.*\.json$
 
 - repo: https://github.com/executablebooks/mdformat
   rev: 1.0.0

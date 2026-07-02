@@ -13,6 +13,8 @@ import (
 	. "github.com/onsi/gomega"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/k3s"
+
+	"github.com/thezmc/kubectl-craft/test/cluster"
 )
 
 func TestIntegration(t *testing.T) {
@@ -32,11 +34,6 @@ func TestIntegration(t *testing.T) {
 // fails the spec instead of hanging the run.
 const defaultSpecTimeout = 3 * time.Minute
 
-// k3sImage pins the conformant cluster the suite runs against. The version
-// matrix (oldest-supported + latest) is a later CI concern; the suite itself
-// only assumes a cluster that serves OpenAPI v3 Documents.
-const k3sImage = "rancher/k3s:v1.36.2-k3s1"
-
 // k3sContainer is owned by parallel process 1, which boots and tears down
 // the one shared container; it stays nil on every other process.
 var k3sContainer *k3s.K3sContainer
@@ -47,7 +44,10 @@ var kubeconfigBytes []byte
 
 var _ = SynchronizedBeforeSuite(func(ctx SpecContext) []byte {
 	container, err := k3s.Run(
-		ctx, k3sImage,
+		// The image pin is shared with the fixture-capture tool
+		// (test/cluster), so the corpus and these specs describe one
+		// cluster version.
+		ctx, cluster.K3sImage,
 		// Silence the components that would add schema noise to the
 		// /openapi/v3 index. The module already disables traefik; it is
 		// repeated here so the full noise-reduction list reads in one

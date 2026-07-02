@@ -1,0 +1,64 @@
+# Sample CRD for the fixture corpus (DESIGN.md — Testing): a Kind served at
+# two versions, feeding M3's version carry-over specs. spec.size keeps the
+# same Field Path in both versions (carries over); v1's spec.paint is renamed
+# to spec.color in v2 (dropped on switch, lands in the drop report). Installed
+# into the capture cluster by `mise run fixtures:capture` and captured as the
+# apis/craft.example.com/v1 and apis/craft.example.com/v2 group documents.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: widgets.craft.example.com
+spec:
+  group: craft.example.com
+  scope: Namespaced
+  names:
+    plural: widgets
+    singular: widget
+    kind: Widget
+    listKind: WidgetList
+  conversion:
+    strategy: None
+  versions:
+  - name: v1
+    served: true
+    storage: false
+    schema:
+      openAPIV3Schema:
+        type: object
+        description: Widget (v1) — the older served version of the multi-version sample Kind.
+        properties:
+          spec:
+            type: object
+            description: Desired Widget shape, v1 spelling.
+            required:
+            - size
+            properties:
+              size:
+                type: integer
+                description: Widget size; the same Field Path exists in v2, so a Draft value carries over on a version switch.
+              paint:
+                type: string
+                description: Surface paint, v1-only spelling; v2 renames this Field Path to color, so a Draft value is dropped on a version switch.
+  - name: v2
+    served: true
+    storage: true
+    schema:
+      openAPIV3Schema:
+        type: object
+        description: Widget (v2) — the Preferred Version of the multi-version sample Kind.
+        properties:
+          spec:
+            type: object
+            description: Desired Widget shape, v2 spelling.
+            required:
+            - size
+            properties:
+              size:
+                type: integer
+                description: Widget size; the same Field Path exists in v1, so a Draft value carries over on a version switch.
+              color:
+                type: string
+                description: Surface color, the v2 spelling of v1's paint Field Path.
+              finish:
+                type: string
+                description: Surface finish, new in v2 with no v1 counterpart.
