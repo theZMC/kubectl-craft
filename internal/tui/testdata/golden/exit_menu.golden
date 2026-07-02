@@ -1,0 +1,8 @@
+craft.example.com/v1 Widget › spec.size
+quit composing — what happens to the Draft?
+
+> Emit & quit — emit the Manifest to stdout
+  Discard & quit — quit with nothing emitted
+  Cancel — keep composing
+✔ no required fields missing   Validate needs metadata.name
+↑/↓ choose · enter confirm · esc cancel

@@ -1,0 +1,17 @@
+craft.example.com/v1 Gadget › spec.nickname
+  ▾ Gadget                                nickname
+      apiVersion                          type: string
+      kind                                constraints:
+    ▸ metadata                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+    ▾ spec                                  minLength: 1
+        efficiency                          maxLength: 63
+      ▸ gears
+        maxReplicas ✱                     Human-friendly gadget nickname, DNS-label style.
+        maxUnavailable
+        minReplicas ✱
+>       nickname: ratchet
+        profile: balanced
+        teeth
+        tuning
+✱ 2 required fields missing   Validate needs metadata.name and metadata.namespace
+d unset · j/k move · h/l collapse/expand · enter edit/toggle · g/G top/bottom · / search · v validat

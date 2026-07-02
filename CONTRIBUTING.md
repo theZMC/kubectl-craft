@@ -8,6 +8,7 @@ ______________________________________________________________________
 - [Test loops](#test-loops)
 - [Fixture corpus](#fixture-corpus)
 - [Recorded Status corpus](#recorded-status-corpus)
+- [Golden frames](#golden-frames)
 
 ______________________________________________________________________
 
@@ -123,3 +124,30 @@ mise run fixtures:capture-status
 It boots a fresh k3s container (the same image the integration suite pins),
 installs the sample CRDs, registers the always-deny webhook, POSTs each scenario
 Manifest with `?dryRun=All`, and rewrites the fixture files. Commit the result.
+
+## Golden frames
+
+The teatest specs in `internal/tui/frames_test.go` pin the Session shell's
+signature surfaces — the Kind picker, the compose view, and the exit menu — as
+rendered frames in `internal/tui/testdata/golden/`. Each spec drives a real
+`tea.Program` on teatest's in-memory terminal (no PTY, so they run in the fast
+loop) at a fixed **100×30** and with the color profile forced to Ascii, so CI
+and a local terminal pin identical bytes. The frames are normalized before
+comparing or writing: trailing whitespace is stripped from every line (the panes
+pad lines to their widths) and each frame ends with exactly one newline, which
+keeps the checked-in goldens out of the pre-commit fixer hooks' way.
+
+Regenerate them with (the golden Manifests in `internal/schema/testdata/golden/`
+answer to the same switch — point ginkgo at `./internal/schema` for those):
+
+```sh
+KUBECTL_CRAFT_UPDATE_GOLDEN=1 go run github.com/onsi/ginkgo/v2/ginkgo ./internal/tui
+```
+
+Then **eyeball the diff before committing**: a golden diff is the review
+surface, not an inconvenience. Read it as a screenshot — check that the
+breadcrumb, tree rows, markers (`✱` required, dimmed defaults like
+`profile: balanced`), status line, and hint bar moved the way the change
+intended, and that nothing else drifted (layout shifts, truncation at column
+100, style bleed, glyph collisions). A diff you cannot explain is a regression,
+not a regen.

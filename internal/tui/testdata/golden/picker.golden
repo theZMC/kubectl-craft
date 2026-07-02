@@ -1,0 +1,7 @@
+>
+> ConfigMap  v1 (cm)
+  Pod  v1 (po)
+  Deployment  apps/v1 (deploy)
+  HorizontalPodAutoscaler  autoscaling/v2 (hpa)
+  HorizontalPodAutoscaler  autoscaling/v1 (hpa)
+  Gadget  craft.example.com/v1 (gz)
