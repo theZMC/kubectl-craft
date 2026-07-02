@@ -1,5 +1,9 @@
 # Contributing
 
+New here? The user-facing story lives in the [README](README.md), the domain
+language in [CONTEXT.md](CONTEXT.md), and the decided product shape in
+[docs/DESIGN.md](docs/DESIGN.md).
+
 <!--TOC-->
 
 ______________________________________________________________________
@@ -9,6 +13,7 @@ ______________________________________________________________________
 - [Fixture corpus](#fixture-corpus)
 - [Recorded Status corpus](#recorded-status-corpus)
 - [Golden frames](#golden-frames)
+- [Demo](#demo)
 
 ______________________________________________________________________
 
@@ -151,3 +156,33 @@ breadcrumb, tree rows, markers (`✱` required, dimmed defaults like
 intended, and that nothing else drifted (layout shifts, truncation at column
 100, style bleed, glyph collisions). A diff you cannot explain is a regression,
 not a regen.
+
+## Demo
+
+The README's demo is scripted in [`demo.tape`](demo.tape) and rendered with
+[vhs](https://github.com/charmbracelet/vhs) (`vhs demo.tape`). The tape records
+the signature loop — pick a Kind, search a Field Path, fill values, Validate to
+a CEL finding, jump, fix, clean pass, Emit — and every keypress in it is a real
+binding: the source of truth is the `?` help overlay (`helpText` in
+`internal/tui/compose.go`), which the README's keybinding table mirrors. A
+keybinding change means re-checking all three.
+
+The tape assumes a reproducible environment: `kubectl-craft` and `kubectl` on
+`PATH`, a clean scratch working directory, and `KUBECONFIG` pointing at a
+cluster with the sample CRDs from `internal/schema/testdata/crds/` installed —
+the demo leans on the Gadget CRD's CEL rule, which only the server evaluates, so
+`v` produces a real finding. Two mise tasks provide all of it (**requires a
+running Docker daemon**):
+
+```sh
+mise run demo:cluster   # create/reuse the k3d demo cluster, install the CRDs
+mise run demo:render    # build the binary, replay demo.tape, write demo.gif
+```
+
+The vhs toolchain (vhs, ttyd, ffmpeg) and k3d/kubectl are pinned as task-scoped
+tools on the tasks themselves, not in `[tools]`, so `mise install` and CI stay
+lean. Delete the cluster with `k3d cluster delete kubectl-craft-demo`. The
+rendered `demo.gif` (~2.4MB) is gitignored and published with releases rather
+than committed — a multi-megabyte binary that re-renders on every polish pass is
+history the repo doesn't need, and it outweighs the pre-commit 500KB large-file
+cap. Regenerate it whenever the flow or the keymap changes.

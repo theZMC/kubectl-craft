@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# [MISE] description="Create (or reuse) the throwaway k3d demo cluster with the sample CRDs installed (requires Docker)"
+# [MISE] dir="{{config_root}}"
+# [MISE] tools={k3d = "5.9.0", kubectl = "1.36.2"}
+#
+# The demo tape (demo.tape) runs against this cluster: a single-node k3d
+# cluster named kubectl-craft-demo with the sample CRDs from
+# internal/schema/testdata/crds/ installed. Deliberately uncached — the
+# cluster is external state only the cluster can vouch for. Delete it with
+# `k3d cluster delete kubectl-craft-demo`.
+set -euo pipefail
+
+cluster=kubectl-craft-demo
+
+if ! k3d cluster list "$cluster" >/dev/null 2>&1; then
+  k3d cluster create "$cluster" --wait
+fi
+
+kubeconfig=$(mktemp)
+trap 'rm -f "$kubeconfig"' EXIT
+k3d kubeconfig get "$cluster" > "$kubeconfig"
+
+KUBECONFIG="$kubeconfig" kubectl apply -f internal/schema/testdata/crds/
+KUBECONFIG="$kubeconfig" kubectl wait --for=condition=Established \
+  crd/gadgets.craft.example.com crd/widgets.craft.example.com --timeout=60s
+
+echo "demo cluster '$cluster' is ready (context k3d-$cluster)"

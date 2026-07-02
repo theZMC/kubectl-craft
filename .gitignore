@@ -7,3 +7,8 @@ coverage.out
 
 # goreleaser output (snapshot and release builds)
 /dist/
+
+# Rendered demo recording (mise run demo:render) — published with releases,
+# not committed: it re-renders on every polish pass and outweighs the
+# repo's 500KB large-file cap. demo.tape is the source of truth.
+/demo.gif

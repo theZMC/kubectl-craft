@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# [MISE] description="Render demo.gif from demo.tape with vhs against the k3d demo cluster (requires Docker)"
+# [MISE] dir="{{config_root}}"
+# [MISE] depends=["demo:cluster"]
+# [MISE] tools={vhs = "0.11.0", "conda:ttyd" = "1.7.7", ffmpeg = "8.1.2", k3d = "5.9.0", kubectl = "1.36.2"}
+#
+# ttyd comes from conda-forge: the aqua/GitHub-release ttyd ships no
+# darwin/arm64 binary, and conda-forge covers every platform vhs runs on.
+#
+# Builds the kubectl-craft binary, points KUBECONFIG at the demo cluster,
+# and replays demo.tape in a clean scratch directory so the recorded
+# `kubectl craft > gadget.yaml` leaves no strays in the repo. The rendered
+# demo.gif lands in the repo root. Deliberately uncached — the recording is
+# only as fresh as the run that produced it.
+set -euo pipefail
+
+root=$(pwd)
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+
+# The tape invokes the plugin through kubectl's discovery convention:
+# a kubectl-craft binary on PATH.
+go build -o "$scratch/bin/kubectl-craft" ./cmd/kubectl-craft
+
+k3d kubeconfig get kubectl-craft-demo > "$scratch/kubeconfig"
+
+cd "$scratch"
+PATH="$scratch/bin:$PATH" KUBECONFIG="$scratch/kubeconfig" vhs "$root/demo.tape"
+mv demo.gif "$root/demo.gif"
+
+echo "rendered $root/demo.gif"

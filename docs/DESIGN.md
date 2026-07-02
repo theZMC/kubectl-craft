@@ -18,9 +18,10 @@ ______________________________________________________________________
 
 <!--TOC-->
 
-The decided shape of the tool. Domain language lives in
-[CONTEXT.md](../CONTEXT.md); irreversible decisions live in [adr/](./adr/); the
-build slicing lives in [MILESTONES.md](./MILESTONES.md).
+The decided shape of the tool. The user-facing story lives in the
+[README](../README.md); domain language lives in [CONTEXT.md](../CONTEXT.md);
+irreversible decisions live in [adr/](./adr/); the build slicing lives in
+[MILESTONES.md](./MILESTONES.md).
 
 ## Concept
 
@@ -91,10 +92,10 @@ substrate; composing is the product. The tool never mutates the cluster
    nodes (error marker; message in the detail pane), with jump-to-first-error.
    Unmappable errors (freeform webhook denials, top-level failures) land in a
    validation results pane. Emitted YAML is **sparse by default**: exactly the
-   fields the user set (plus apiVersion/kind/metadata identity). Schema defaults
-   appear in the detail pane and as dimmed placeholders in the tree, not in the
-   output — with an **opt-in expansion toggle** that also emits defaulted fields
-   for users who want self-documenting manifests.
+   fields the user set (plus apiVersion/kind identity). Schema defaults appear
+   in the detail pane and as dimmed placeholders in the tree, not in the output
+   — with an **opt-in expansion toggle** that also emits defaulted fields for
+   users who want self-documenting manifests.
 
 ## Keybindings
 

@@ -17,7 +17,9 @@ A `kubectl` plugin that presents a TUI for **composing** Kubernetes manifests
 from the **Type Schemas** defined on the cluster the current context points to —
 navigate the field tree, fill values with per-field documentation alongside,
 produce a valid **Manifest**. Browsing the schemas is the substrate; composing
-is the product.
+is the product. This file is the domain glossary the whole repo speaks; the
+user-facing story lives in the [README](README.md) and the decided shape in
+[docs/DESIGN.md](docs/DESIGN.md).
 
 ## Language
 
