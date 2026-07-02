@@ -11,12 +11,13 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 )
 
 // noShell is the sessionShell for specs that never reach a launch.
-func noShell(context.Context, int) error { return nil }
+func noShell(context.Context, []data.Kind) error { return nil }
 
 // writeKubeconfig writes a kubeconfig whose fixed context points at the
 // given server, the way a Session binds to one cluster at invocation.
@@ -67,15 +68,46 @@ func captureStdout(run func() error) (string, error) {
 	return string(captured), runErr
 }
 
+// serveJSON answers one discovery or index endpoint with a fixed JSON
+// body, typed so client-go's content negotiation takes the legacy
+// (unaggregated) discovery path.
+func serveJSON(body string) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}
+}
+
+// craftableClusterMux mocks the two live pre-flight surfaces a Session
+// resolves before its shell starts: the /openapi/v3 index and discovery
+// (core v1 ConfigMap + apps/v1 Deployment, both create-capable).
+func craftableClusterMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/openapi/v3", serveJSON(`{"paths":{`+
+		`"api/v1":{"serverRelativeURL":"/openapi/v3/api/v1?hash=CORE1HASH"},`+
+		`"apis/apps/v1":{"serverRelativeURL":"/openapi/v3/apis/apps/v1?hash=APPS1HASH"}}}`))
+	mux.HandleFunc("/api", serveJSON(`{"kind":"APIVersions","versions":["v1"]}`))
+	mux.HandleFunc("/api/v1", serveJSON(`{"kind":"APIResourceList","groupVersion":"v1","resources":[`+
+		`{"name":"configmaps","singularName":"configmap","namespaced":true,"kind":"ConfigMap",`+
+		`"verbs":["create","get","list"],"shortNames":["cm"]}]}`))
+	mux.HandleFunc("/apis", serveJSON(`{"kind":"APIGroupList","groups":[{"name":"apps",`+
+		`"versions":[{"groupVersion":"apps/v1","version":"v1"}],`+
+		`"preferredVersion":{"groupVersion":"apps/v1","version":"v1"}}]}`))
+	mux.HandleFunc("/apis/apps/v1", serveJSON(`{"kind":"APIResourceList","groupVersion":"apps/v1","resources":[`+
+		`{"name":"deployments","singularName":"deployment","namespaced":true,"kind":"Deployment",`+
+		`"verbs":["create","get","list"],"shortNames":["deploy"]}]}`))
+	return mux
+}
+
 // executeSession runs the root command against the given kubeconfig with a
 // recording sessionShell, mirroring one Session launch. It returns whatever
-// the process wrote to the real stdout during execution, the group counts
+// the process wrote to the real stdout during execution, the Kind lists
 // the shell was launched with, and the execution error.
-func executeSession(kubeconfig string) (string, []int, error) {
+func executeSession(kubeconfig string) (string, [][]data.Kind, error) {
 	GinkgoHelper()
-	var launches []int
-	shell := func(_ context.Context, groupCount int) error {
-		launches = append(launches, groupCount)
+	var launches [][]data.Kind
+	shell := func(_ context.Context, kinds []data.Kind) error {
+		launches = append(launches, kinds)
 		return nil
 	}
 	cmd := newRootCommand(shell)
@@ -98,24 +130,54 @@ var _ = Describe("the root command", func() {
 		}
 	})
 
-	When("the Session's cluster serves OpenAPI v3 Documents", func() {
-		It("launches the Session shell with the live index's group count, keeping stdout clean", func() {
+	When("the Session's cluster serves OpenAPI v3 Documents and discovery", func() {
+		It("launches the Session shell with the discovered browsable Kinds, keeping stdout clean", func() {
+			server := httptest.NewServer(craftableClusterMux())
+			DeferCleanup(server.Close)
+
+			out, launches, err := executeSession(writeKubeconfig(server.URL))
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(launches).To(HaveLen(1),
+				"the shell must launch exactly once, with the Kind list resolved before the alt screen opens")
+			Expect(launches[0]).To(ConsistOf(
+				data.Kind{
+					GVK:              schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"},
+					GroupVersionPath: "api/v1",
+					ShortNames:       []string{"cm"},
+					Preferred:        true,
+				},
+				data.Kind{
+					GVK:              schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"},
+					GroupVersionPath: "apis/apps/v1",
+					ShortNames:       []string{"deploy"},
+					Preferred:        true,
+				},
+			), "the shell receives every create-capable Kind with its GVK, Document path, short names, and Preferred marking")
+			Expect(out).To(BeEmpty(),
+				"the command path must write nothing to the process stdout — it is reserved for the Emitted Manifest")
+		})
+	})
+
+	When("the Session's cluster serves the index but discovery fails", func() {
+		It("hard-fails on stderr before the Session shell ever starts", func() {
 			mux := http.NewServeMux()
-			mux.HandleFunc("/openapi/v3", func(w http.ResponseWriter, _ *http.Request) {
-				_, _ = w.Write([]byte(`{"paths":{` +
-					`"api/v1":{"serverRelativeURL":"/openapi/v3/api/v1?hash=CORE1HASH"},` +
-					`"apis/apps/v1":{"serverRelativeURL":"/openapi/v3/apis/apps/v1?hash=APPS1HASH"}}}`))
+			mux.HandleFunc("/openapi/v3", serveJSON(`{"paths":{`+
+				`"api/v1":{"serverRelativeURL":"/openapi/v3/api/v1?hash=CORE1HASH"}}}`))
+			mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+				http.Error(w, "discovery is down", http.StatusInternalServerError)
 			})
 			server := httptest.NewServer(mux)
 			DeferCleanup(server.Close)
 
 			out, launches, err := executeSession(writeKubeconfig(server.URL))
 
-			Expect(err).NotTo(HaveOccurred())
-			Expect(launches).To(Equal([]int{2}),
-				"the shell must launch exactly once, with N from the live index fetch")
-			Expect(out).To(BeEmpty(),
-				"the command path must write nothing to the process stdout — it is reserved for the Emitted Manifest")
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("Kinds"),
+				"the failure must name the Kind discovery step")
+			Expect(launches).To(BeEmpty(),
+				"a failed discovery must surface before the alt screen ever opens")
+			Expect(out).To(BeEmpty())
 		})
 	})
 

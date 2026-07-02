@@ -8,6 +8,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+
+	"github.com/thezmc/kubectl-craft/internal/data"
 )
 
 func TestKubectlCraft(t *testing.T) {
@@ -19,7 +21,7 @@ var _ = Describe("the kubectl-craft binary", func() {
 	It("reports the build-time version via --version without starting a Session", func() {
 		out := &bytes.Buffer{}
 		launched := false
-		cmd := newRootCommand(func(context.Context, int) error {
+		cmd := newRootCommand(func(context.Context, []data.Kind) error {
 			launched = true
 			return nil
 		})

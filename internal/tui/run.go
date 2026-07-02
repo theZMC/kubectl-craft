@@ -6,6 +6,8 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/thezmc/kubectl-craft/internal/data"
 )
 
 // Run launches the Session shell as an alt-screen Bubble Tea program on
@@ -20,7 +22,7 @@ import (
 // Without a controlling terminal (for example, a non-interactive CI job),
 // opening /dev/tty fails and Run returns before any program starts; the
 // caller surfaces that on stderr as a non-zero exit.
-func Run(ctx context.Context, groupCount int) error {
+func Run(ctx context.Context, kinds []data.Kind) error {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf(
@@ -30,7 +32,7 @@ func Run(ctx context.Context, groupCount int) error {
 	defer func() { _ = tty.Close() }()
 
 	program := tea.NewProgram(
-		New(groupCount),
+		New(kinds),
 		tea.WithContext(ctx),
 		tea.WithAltScreen(),
 		tea.WithInput(tty),
