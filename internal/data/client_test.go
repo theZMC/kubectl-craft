@@ -22,7 +22,7 @@ func newSessionClient(host string) *data.Client {
 }
 
 var _ = Describe("the Session's OpenAPI v3 client", func() {
-	Context("when the cluster serves OpenAPI v3 Documents", func() {
+	When("the cluster serves OpenAPI v3 Documents", func() {
 		var (
 			client        *data.Client
 			appsDocument  []byte
@@ -75,7 +75,7 @@ var _ = Describe("the Session's OpenAPI v3 client", func() {
 		})
 	})
 
-	Context("when the cluster does not serve /openapi/v3", func() {
+	When("the cluster does not serve /openapi/v3", func() {
 		It("refuses the Session with the minimum-version error, gated on capability alone", func(ctx SpecContext) {
 			server := httptest.NewServer(http.NotFoundHandler())
 			DeferCleanup(server.Close)
@@ -89,7 +89,7 @@ var _ = Describe("the Session's OpenAPI v3 client", func() {
 		})
 	})
 
-	Context("when the cluster is unreachable", func() {
+	When("the cluster is unreachable", func() {
 		It("hard-fails the Session with a clear kubectl-like connection error", func(ctx SpecContext) {
 			server := httptest.NewServer(http.NotFoundHandler())
 			unreachable := server.URL
