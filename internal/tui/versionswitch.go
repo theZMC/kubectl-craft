@@ -394,6 +394,7 @@ func (m Model) commitVersionSwitch(pending pendingSwitch) Model {
 	}
 
 	view.versions = previous.versions
+	view.defaultNamespace = previous.defaultNamespace
 	if row := previous.focused(); row != nil {
 		view = view.landAfterSwitch(row.node.FieldPath())
 	}

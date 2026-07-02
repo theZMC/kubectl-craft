@@ -28,10 +28,16 @@ func widgetV2() data.Kind {
 }
 
 // newVersionedShell builds the Session shell over a Kind list carrying both
-// Widget versions, around the given Fetcher.
+// Widget versions, around the given Fetcher and an always-Clean Validator.
 func newVersionedShell(fetcher data.Fetcher) tui.Model {
+	return newVersionedShellWith(fetcher, &stubValidator{outcome: data.Clean{}})
+}
+
+// newVersionedShellWith builds the two-version Widget shell around one
+// specific Validator, for specs that drive Validate across a switch.
+func newVersionedShellWith(fetcher data.Fetcher, validator data.Validator) tui.Model {
 	kinds := append(browsableKinds(), widgetV1(), widgetV2())
-	return tui.New(context.Background(), kinds, fetcher, corpusIndex(), nil)
+	return tui.New(context.Background(), kinds, fetcher, corpusIndex(), validator, "", nil)
 }
 
 // composeWidgetV1 opens the compose view on craft.example.com/v1 Widget over

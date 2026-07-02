@@ -123,9 +123,11 @@ func newShell() tui.Model {
 }
 
 // newShellWith builds the Session shell around one specific Fetcher, for
-// specs that observe or fail its fetches.
+// specs that observe or fail its fetches; the Validator seam gets an
+// always-Clean stub, and no default namespace resolves.
 func newShellWith(fetcher data.Fetcher) tui.Model {
-	return tui.New(context.Background(), browsableKinds(), fetcher, corpusIndex(), nil)
+	return tui.New(context.Background(), browsableKinds(), fetcher, corpusIndex(),
+		&stubValidator{outcome: data.Clean{}}, "", nil)
 }
 
 // composeKind builds one off-picker fixture Kind for driving the shell

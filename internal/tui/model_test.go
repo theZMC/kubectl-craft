@@ -22,6 +22,7 @@ func browsableKinds() []data.Kind {
 			GroupVersionPath: "api/v1",
 			Plural:           "configmaps",
 			ShortNames:       []string{"cm"},
+			Namespaced:       true,
 			Preferred:        true,
 		},
 		{
@@ -29,6 +30,7 @@ func browsableKinds() []data.Kind {
 			GroupVersionPath: "api/v1",
 			Plural:           "pods",
 			ShortNames:       []string{"po"},
+			Namespaced:       true,
 			Preferred:        true,
 		},
 		{
@@ -36,6 +38,7 @@ func browsableKinds() []data.Kind {
 			GroupVersionPath: "apis/apps/v1",
 			Plural:           "deployments",
 			ShortNames:       []string{"deploy"},
+			Namespaced:       true,
 			Preferred:        true,
 		},
 		{
@@ -43,12 +46,14 @@ func browsableKinds() []data.Kind {
 			GroupVersionPath: "apis/autoscaling/v1",
 			Plural:           "horizontalpodautoscalers",
 			ShortNames:       []string{"hpa"},
+			Namespaced:       true,
 		},
 		{
 			GVK:              schema.GroupVersionKind{Group: "autoscaling", Version: "v2", Kind: "HorizontalPodAutoscaler"},
 			GroupVersionPath: "apis/autoscaling/v2",
 			Plural:           "horizontalpodautoscalers",
 			ShortNames:       []string{"hpa"},
+			Namespaced:       true,
 			Preferred:        true,
 		},
 		{
@@ -56,6 +61,7 @@ func browsableKinds() []data.Kind {
 			GroupVersionPath: "apis/craft.example.com/v1",
 			Plural:           "gadgets",
 			ShortNames:       []string{"gz"},
+			Namespaced:       true,
 			Preferred:        true,
 		},
 	}

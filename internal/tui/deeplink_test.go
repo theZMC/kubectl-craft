@@ -21,6 +21,8 @@ func deepLinkedShell(kind data.Kind, fieldPath string) tui.Model {
 		browsableKinds(),
 		corpusFetcher(),
 		corpusIndex(),
+		&stubValidator{outcome: data.Clean{}},
+		"",
 		&tui.DeepLink{Kind: kind, FieldPath: fieldPath},
 	)
 }
@@ -134,6 +136,8 @@ var _ = Describe("the deep-linked Session entry", func() {
 				browsableKinds(),
 				fetcher,
 				corpusIndex(),
+				&stubValidator{outcome: data.Clean{}},
+				"",
 				&tui.DeepLink{Kind: kindNamed("Deployment", "v1")},
 			)
 			fetch := model.Init()

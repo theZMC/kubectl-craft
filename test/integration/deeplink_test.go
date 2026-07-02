@@ -21,7 +21,8 @@ var _ = Describe("the deep-link entry against a live k3s cluster", func() {
 		Expect(kind.GVK).To(Equal(schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}))
 		Expect(kind.Preferred).To(BeTrue(), "the deep link lands on the Preferred Version")
 
-		model := tui.New(ctx, kinds, client, index, &tui.DeepLink{Kind: kind, FieldPath: "spec.strategy"})
+		model := tui.New(ctx, kinds, client, index, client, "default",
+			&tui.DeepLink{Kind: kind, FieldPath: "spec.strategy"})
 
 		fetch := model.Init()
 		Expect(fetch).NotTo(BeNil(),

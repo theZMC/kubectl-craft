@@ -29,9 +29,10 @@ const (
 	// composeHints is the compose view's one-line hint bar in navigate
 	// mode (DESIGN.md — Keybindings: k9s-style, the handful of keys for
 	// the focused view; `?` opens the full map). The mutation verbs `a`
-	// and `d` prepend contextually — see navigateHints.
+	// and `d` — and the Validate follow-ups `n` and `r` once findings
+	// exist — prepend contextually; see navigateHints.
 	composeHints = "j/k move · h/l collapse/expand · enter edit/toggle · " +
-		"g/G top/bottom · / search · V version · esc Kind picker · ? help · ctrl+d emit · q quit"
+		"g/G top/bottom · / search · v validate · V version · esc Kind picker · ? help · ctrl+d emit · q quit"
 
 	// keyPromptHints is the hint bar while `a`'s inline key prompt is
 	// open on a map-shaped node, in the modal grammar: Enter confirms,
@@ -59,9 +60,8 @@ const (
 )
 
 // helpText is the `?` full-map help overlay: every key the compose view
-// serves, and nothing it doesn't — Validate arrives in a later issue
-// (DESIGN.md — Keybindings: fixed keys keep the hint bar/help/docs trivially
-// truthful).
+// serves, and nothing it doesn't (DESIGN.md — Keybindings: fixed keys keep
+// the hint bar/help/docs trivially truthful).
 const helpText = `Compose view — navigate mode
 
   j/k, ↑/↓   move focus
@@ -73,6 +73,13 @@ const helpText = `Compose view — navigate mode
   e          pop a schema-blind subtree out to $EDITOR as raw YAML
   g / G      jump to the top / bottom of the tree
   /          search the Kind's Field Paths and jump to a match
+  v          Validate the Draft with a server-side dry-run — nothing persists;
+             findings mark the offending tree nodes, and anything unmappable
+             lands in the results pane. Editing the Draft marks findings stale
+             (v revalidates); switching the version drops them entirely
+  n          jump to the first Validate finding's node; pressing again cycles
+             through the findings in order
+  r          open the Validate results pane
   V          switch the open Kind's version — values carry over by Field Path,
              and a drop report confirms anything that would not survive
   ?          open this help
@@ -246,6 +253,29 @@ type compose struct {
 	// the drops and commits; Esc keeps composing at the current version
 	// untouched (DESIGN.md — Compose lifecycle).
 	pendingSwitch *pendingSwitch
+
+	// defaultNamespace is the Session's default namespace, copied from
+	// the shell: the required-to-Validate gate skips its namespace
+	// prompt whenever it resolves (DESIGN.md — Output).
+	defaultNamespace string
+
+	// gate is `v`'s open required-to-Validate prompt — metadata the
+	// dry-run cannot run without is typed inline and confirmed into the
+	// Draft at its real Field Path; nil otherwise. Esc cancels the whole
+	// Validate.
+	gate *gatePrompt
+
+	// validation is the last Validate's rendered outcome — findings
+	// pinned to tree rows, the unmappable rest, a clean pass, or an
+	// unavailability; nil before the first Validate and after anything
+	// that drops results (a version switch, a mutation over a non-finding
+	// outcome).
+	validation *validationState
+
+	// resultsOpen renders the Validate results pane as the body overlay
+	// (one open at a time, like every other overlay); Esc dismisses it
+	// and `r` reopens it while results exist.
+	resultsOpen bool
 }
 
 // newCompose grows the compose view for a Kind from its parsed group
@@ -517,36 +547,48 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 	// soon as browsing continues.
 	c.notice = ""
 
-	if c.helpOpen {
-		c.helpOpen = false
-		return c, nil
+	if view, cmd, handled := c.updateOverlay(key); handled {
+		return view, cmd
 	}
-	if c.editor != nil {
-		return c.updateEditor(key), nil
-	}
-	if c.keyPrompt != nil {
-		return c.updateKeyPrompt(key), nil
-	}
-	if c.unset != nil {
-		return c.updateUnsetConfirm(key), nil
-	}
-	if c.pendingSwitch != nil {
-		return c.updateSwitchConfirm(key)
-	}
-	if c.versionList != nil {
-		return c.updateVersionList(key)
-	}
-	if c.exit != nil {
-		return c.updateExitMenu(key)
-	}
-	if c.discardToPicker {
-		return c.updateDiscardConfirm(key)
-	}
-	if c.searchOpen {
-		return c.updateSearch(key), nil
-	}
-
 	return c.command(key)
+}
+
+// updateOverlay routes one key press into whichever overlay, prompt, or
+// confirm is open, reporting false when none is — navigate mode's command
+// map takes the key instead.
+func (c compose) updateOverlay(key tea.KeyMsg) (compose, tea.Cmd, bool) {
+	switch {
+	case c.helpOpen:
+		c.helpOpen = false
+		return c, nil, true
+	case c.editor != nil:
+		return c.updateEditor(key), nil, true
+	case c.keyPrompt != nil:
+		return c.updateKeyPrompt(key), nil, true
+	case c.gate != nil:
+		view, cmd := c.updateGatePrompt(key)
+		return view, cmd, true
+	case c.resultsOpen:
+		return c.updateResultsPane(key), nil, true
+	case c.unset != nil:
+		return c.updateUnsetConfirm(key), nil, true
+	case c.pendingSwitch != nil:
+		view, cmd := c.updateSwitchConfirm(key)
+		return view, cmd, true
+	case c.versionList != nil:
+		view, cmd := c.updateVersionList(key)
+		return view, cmd, true
+	case c.exit != nil:
+		view, cmd := c.updateExitMenu(key)
+		return view, cmd, true
+	case c.discardToPicker:
+		view, cmd := c.updateDiscardConfirm(key)
+		return view, cmd, true
+	case c.searchOpen:
+		return c.updateSearch(key), nil, true
+	default:
+		return c, nil, false
+	}
 }
 
 // command applies one navigate-mode command key (DESIGN.md — Keybindings:
@@ -570,6 +612,11 @@ func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
 		return c.pressUnset(), nil
 	case "e":
 		return c.pressPopOut()
+	case "v", "n", "r":
+		// The manual Validate and its follow-ups (DESIGN.md — Command
+		// map: `v` Validate): the dry-run request, the finding jump, and
+		// the results pane.
+		return c.validateCommand(key.String())
 	case "V":
 		// The version switch (DESIGN.md — Command map: `V` version
 		// switch): values carry over by Field Path, a drop report
@@ -1081,8 +1128,11 @@ func rowDisplayName(row *treeRow) string {
 
 // refreshCompleteness recomputes the Draft's completeness — the missing
 // required Draft-level Field Paths given what the Draft has instantiated —
-// after a confirmed mutation.
+// after a confirmed mutation. Because every confirmed mutation funnels
+// through here, it is also the marker lifecycle's one hook: the mutation
+// outdates the last Validate (see markValidationOutdated).
 func (c *compose) refreshCompleteness() {
+	c.markValidationOutdated()
 	missing, err := c.draft.MissingRequired()
 	if err != nil {
 		c.notice = "recomputing the Draft's completeness failed: " + err.Error()
@@ -1386,10 +1436,25 @@ func (c compose) view() string {
 		clipLine(c.footer(), c.width) + "\n"
 }
 
-// statusLine is the persistent completeness line (DESIGN.md — Flow §3: a
-// status line tracks completeness): how many required fields the Draft is
-// still missing, or the complete marker once none are.
+// statusLine is the persistent status line: the completeness segment
+// (DESIGN.md — Flow §3: a status line tracks completeness), the
+// required-to-Validate metadata flag — distinct from the schema-required
+// count, and shown from session start — and the last Validate's state.
 func (c compose) statusLine() string {
+	segments := []string{c.completenessSegment()}
+	if gate := c.validateGateSegment(); gate != "" {
+		segments = append(segments, gate)
+	}
+	if state := c.validateStateSegment(); state != "" {
+		segments = append(segments, state)
+	}
+	return strings.Join(segments, "   ")
+}
+
+// completenessSegment is the schema-required half of the status line: how
+// many required fields the Draft is still missing, or the complete marker
+// once none are.
+func (c compose) completenessSegment() string {
 	count := len(c.missing)
 	if count == 0 {
 		return dimmedStyle.Render("✔ no required fields missing")
@@ -1407,6 +1472,9 @@ func (c compose) statusLine() string {
 func (c compose) footer() string {
 	if c.unset != nil {
 		return highlightedStyle.Render(c.unset.prompt())
+	}
+	if c.gate != nil {
+		return highlightedStyle.Render(c.gate.prompt())
 	}
 	if c.pendingSwitch != nil {
 		return highlightedStyle.Render(c.pendingSwitch.prompt())
@@ -1437,27 +1505,31 @@ func (c compose) hints() string {
 	if c.versionList != nil {
 		return versionListHints
 	}
+	if c.resultsOpen {
+		return resultsPaneHints
+	}
 	if c.searchOpen {
 		return searchHints
 	}
 	return c.navigateHints()
 }
 
-// navigateHints prepends the mutation verbs the focused row serves right now
+// navigateHints prepends the verbs the compose view serves right now
 // (DESIGN.md — Keybindings: the hint bar is contextual to the focused view):
-// `a` on an array or map-shaped node, `d` wherever the Draft holds something
-// to unset, `e` on a schema-blind node — and none on rows they would no-op
-// on.
+// the Validate follow-ups `n` and `r` while findings exist, `a` on an array
+// or map-shaped node, `d` wherever the Draft holds something to unset, `e`
+// on a schema-blind node — and none where they would no-op.
 func (c compose) navigateHints() string {
+	verbs := c.validationVerbs()
 	row := c.focused()
 	if row == nil || !row.loaded {
-		return composeHints
+		return verbs + composeHints
 	}
 	path, addressable := row.draftFieldPath()
 	if !addressable || path == "" {
-		return composeHints
+		return verbs + composeHints
 	}
-	return c.rowVerbs(row, path) + composeHints
+	return verbs + c.rowVerbs(row, path) + composeHints
 }
 
 // rowVerbs spells the hint-bar verbs an addressable, non-root row serves.
@@ -1486,6 +1558,9 @@ func (c compose) bodyView() string {
 	}
 	if c.exit != nil {
 		return limitLines(c.exit.view(), c.bodyHeight())
+	}
+	if c.resultsOpen {
+		return limitLines(clipLines(c.resultsView(), c.width), c.bodyHeight())
 	}
 	if c.pendingSwitch != nil {
 		return limitLines(clipLines(c.pendingSwitch.view(), c.width), c.bodyHeight())
@@ -1570,6 +1645,9 @@ func (c compose) renderTreeRow(index int) string {
 	if c.rowMissingRequired(row) {
 		label += " " + requiredMarker
 	}
+	if c.rowHasFindings(row) {
+		label += " " + findingMarker
+	}
 
 	return cursor + strings.Repeat("  ", row.depth) + indicator + label
 }
@@ -1648,7 +1726,8 @@ func (c compose) detailLines() []string {
 	if err != nil {
 		return []string{highlightedStyle.Render(row.label), "", "reading this field's Type Schema failed: " + err.Error()}
 	}
-	return append(metadataLines(row, meta, c.rowMissingRequired(row)), c.graftDetailLines(row)...)
+	lines := append(metadataLines(row, meta, c.rowMissingRequired(row)), c.graftDetailLines(row)...)
+	return append(lines, c.findingDetailLines(row)...)
 }
 
 // graftDetailLines renders the raw-YAML graft the Draft holds at the focused

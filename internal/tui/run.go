@@ -47,15 +47,16 @@ type Result struct {
 //
 // The Validator and the Session's default namespace arrive through the
 // same seam the Fetcher does — resolved by the command before the alt
-// screen opens. The shell does not consume them yet: the manual Validate
-// keybinding wires them into the Model in the Validate-surfaces issue.
+// screen opens — and feed the manual `v` Validate: the dry-run POST goes
+// through the Validator, and the namespace resolves from the Draft's
+// metadata.namespace, else the Session default (data.ResolveNamespace).
 func Run(
 	ctx context.Context,
 	kinds []data.Kind,
 	fetcher data.Fetcher,
 	index []data.GroupVersion,
-	_ data.Validator,
-	_ string,
+	validator data.Validator,
+	defaultNamespace string,
 	link *DeepLink,
 ) (Result, error) {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -67,7 +68,7 @@ func Run(
 	defer func() { _ = tty.Close() }()
 
 	program := tea.NewProgram(
-		New(ctx, kinds, fetcher, index, link),
+		New(ctx, kinds, fetcher, index, validator, defaultNamespace, link),
 		tea.WithContext(ctx),
 		tea.WithAltScreen(),
 		tea.WithInput(tty),

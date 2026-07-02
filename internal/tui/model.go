@@ -79,6 +79,10 @@ const (
 	// composeFailed is the in-TUI error state for a fetch or parse that
 	// failed mid-Session.
 	composeFailed
+	// validatingDraft is the in-flight state of a manual Validate: the
+	// emitted Draft is out on its server-side dry-run, the compose view
+	// (Draft included) intact underneath — cancelling returns to it.
+	validatingDraft
 )
 
 // Model is the Session shell: the root Bubble Tea model for one Session.
@@ -99,6 +103,24 @@ type Model struct {
 	// hands over the hash-validated disk cache in front of the live
 	// client (ADR-0002), transparently behind this seam.
 	fetcher data.Fetcher
+
+	// validator runs the manual Validate's server-side dry-run behind
+	// the Session's other data seam (DESIGN.md — Output): the live
+	// client in production — dry-run answers are never cached — and a
+	// stub in specs.
+	validator data.Validator
+
+	// defaultNamespace is the Session's default namespace, resolved once
+	// at launch the way kubectl resolves it (--namespace, else the
+	// kubeconfig context default). Validate falls back to it whenever
+	// the Draft sets no metadata.namespace (data.ResolveNamespace).
+	defaultNamespace string
+
+	// validateSeq numbers Validate flights: an outcome landing with a
+	// stale sequence — cancelled by Esc, or superseded by a newer `v` —
+	// is dropped, so it can never clobber the compose view's state
+	// (the same stale-fetch guard the version switch uses).
+	validateSeq int
 
 	// contentHashes indexes the live /openapi/v3 index's server content
 	// hashes by group-version path, so every lazy fetch is addressed by
@@ -144,21 +166,33 @@ type Model struct {
 // New builds the Session shell over what the Session resolved before the
 // alt screen opened: the browsable Kind list from discovery, the Fetcher
 // that sources group documents, the live /openapi/v3 index whose content
-// hashes address every lazy fetch, and the launch arg's resolved deep link
-// when one was given — a deep-linked Session skips the picker and opens on
-// the linked Kind directly (nil launches on the picker as usual).
-func New(ctx context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion, link *DeepLink) Model {
+// hashes address every lazy fetch, the Validator behind the manual `v`
+// Validate, the Session's default namespace Validate falls back to, and
+// the launch arg's resolved deep link when one was given — a deep-linked
+// Session skips the picker and opens on the linked Kind directly (nil
+// launches on the picker as usual).
+func New(
+	ctx context.Context,
+	kinds []data.Kind,
+	fetcher data.Fetcher,
+	index []data.GroupVersion,
+	validator data.Validator,
+	defaultNamespace string,
+	link *DeepLink,
+) Model {
 	contentHashes := make(map[string]string, len(index))
 	for _, group := range index {
 		contentHashes[group.Path] = group.ContentHash
 	}
 
 	model := Model{
-		ctx:           ctx,
-		picker:        newPicker(kinds),
-		fetcher:       fetcher,
-		contentHashes: contentHashes,
-		documents:     map[string]*schema.Document{},
+		ctx:              ctx,
+		picker:           newPicker(kinds),
+		fetcher:          fetcher,
+		validator:        validator,
+		defaultNamespace: defaultNamespace,
+		contentHashes:    contentHashes,
+		documents:        map[string]*schema.Document{},
 	}
 
 	if link != nil {
@@ -182,10 +216,9 @@ func (m Model) Init() tea.Cmd {
 	return nil
 }
 
-// Update applies one message to the Session shell. Keys route to the open
-// view; the typed messages carry the Session's transitions — the picker's
-// handoff, the lazy document fetch landing or failing, and the compose
-// view's return to the picker.
+// Update applies one message to the Session shell: the terminal size and
+// keys route to the open view, and every other typed message is one of the
+// Session's transitions.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -193,6 +226,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.picker = m.picker.resize(msg.Height)
 		m.compose = m.compose.resize(msg.Width, msg.Height)
 		return m, nil
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+	default:
+		return m.updateTransition(msg)
+	}
+}
+
+// updateTransition applies one of the Session's typed transition messages:
+// the picker's handoff, the lazy document fetch landing or failing, the
+// compose view's return to the picker, the version switch's and the manual
+// Validate's flights, and the emit ramp.
+func (m Model) updateTransition(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
 	case KindSelectedMsg:
 		return m.openKind(msg.Kind)
 	case documentFetchedMsg:
@@ -205,6 +251,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.startVersionSwitch(msg.kind)
 	case versionSwitchAcceptedMsg:
 		return m.acceptVersionSwitch(), nil
+	case validateRequestedMsg:
+		return m.startValidate(msg.manifest)
+	case validateOutcomeMsg:
+		return m.validateResolved(msg), nil
 	case manifestEmittedMsg:
 		// The emit ramp: record the decision and the bytes, then quit —
 		// the caller writes the Manifest to stdout after the alt screen
@@ -216,8 +266,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.compose = m.compose.editorFinished(msg)
 		}
 		return m, nil
-	case tea.KeyMsg:
-		return m.handleKey(msg)
 	}
 
 	return m, nil
@@ -321,6 +369,7 @@ func (m Model) openCompose(document *schema.Document) Model {
 	}
 
 	view.versions = m.kindVersions(m.kind)
+	view.defaultNamespace = m.defaultNamespace
 	if m.pendingFieldPath != "" {
 		view = view.landDeepLink(m.pendingFieldPath)
 		m.pendingFieldPath = ""
@@ -357,6 +406,8 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.compose, cmd = m.compose.update(key)
 		return m, cmd
+	case validatingDraft:
+		return m.validateTransitKey(key)
 	default:
 		return m.transitKey(key)
 	}
@@ -391,6 +442,9 @@ func (m Model) View() string {
 			" OpenAPI v3 Document — a group's Type Schemas load lazily on its first open")
 	case composeFailed:
 		return m.transitView("opening " + kindDisplayName(m.kind) + " failed: " + m.fetchErr.Error())
+	case validatingDraft:
+		return m.transitView("validating the Draft with a server-side dry-run — " +
+			"full schema, CRD-rule, and admission webhook validation, nothing persisted")
 	default:
 		return m.compose.view()
 	}
@@ -403,6 +457,9 @@ func (m Model) transitView(body string) string {
 	hints := transitHints
 	if m.switching != nil {
 		hints = switchTransitHints
+	}
+	if m.view == validatingDraft {
+		hints = validateTransitHints
 	}
 	return clipLine(kindDisplayName(m.transitKind()), m.width) + "\n\n" +
 		clipLine(body, m.width) + "\n\n" +
