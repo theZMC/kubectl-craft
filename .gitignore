@@ -1,0 +1,6 @@
+# Locally built plugin binary (go build ./cmd/kubectl-craft)
+/kubectl-craft
+
+# Test artifacts
+*.test
+coverage.out

@@ -1,0 +1,103 @@
+repos:
+- repo: https://github.com/pre-commit/pre-commit-hooks
+  rev: v6.0.0
+  hooks:
+  - id: check-yaml
+    args:
+    - --allow-multiple-documents
+    - --unsafe
+  - id: check-toml
+  - id: check-json
+  - id: end-of-file-fixer
+  - id: trailing-whitespace
+  - id: check-added-large-files
+    args:
+    - --maxkb=500
+
+- repo: https://github.com/executablebooks/mdformat
+  rev: 1.0.0
+  hooks:
+  - id: mdformat
+    files: \.md$
+    exclude: ^(CHANGELOG\.md|\.agents/skills/|\.claude/skills) # Exclude generated/changing markdown that does not use repo doc formatting
+    args:
+    - --wrap=80
+    additional_dependencies:
+    - mdformat-gfm
+
+- repo: https://github.com/google/yamlfmt
+  rev: v0.21.0
+  hooks:
+  - id: yamlfmt
+    files: \.ya?ml$
+    args:
+    - -formatter
+    - indentless_arrays=true,retain_line_breaks=true,scan_folded_as_literal=true
+
+- repo: https://github.com/jsh9/markdown-toc-creator
+  rev: 0.1.3
+  hooks:
+  - id: markdown-toc-creator
+    exclude: ^(CHANGELOG\.md|\.agents/skills/|\.claude/skills) # Exclude generated/changing markdown that does not use repo doc formatting
+    args:
+    - --add-toc-title=False
+
+- repo: local
+  hooks:
+  - id: gofumpt
+    name: check code formatting with gofumpt
+    language: system
+    files: \.go$
+    entry: gofumpt -l -w
+
+- repo: local
+  hooks:
+  - id: go-mod-tidy
+    name: run go mod tidy
+    pass_filenames: false
+    language: system
+    files: (\.go|go\.mod|go\.sum)$
+    entry: bash -c 'PATH="$(go env GOROOT)/bin:$PATH" go mod tidy -e'
+
+- repo: local
+  hooks:
+  - id: golangci-lint
+    name: run golangci-lint
+    language: system
+    files: \.go$
+    entry: >-
+      bash -c 'PATH="$(go env GOBIN):$PATH";
+      dirs=$(for file in "$@"; do dirname "$file"; done | sort -u);
+      golangci-lint run --fix --timeout=40m $dirs' --
+
+- repo: local
+  hooks:
+  - id: enforce-upper-case-names
+    name: enforce UPPER_CASE.md naming
+    files: \.md$
+    entry: bash
+    args:
+    - -c
+    - |
+      for path in "$@"; do
+        basefile=$(basename "$path")
+        if [[ "$basefile" =~ ^[A-Z_0-9]+\.md$ ]]; then
+            continue
+        fi
+
+        filename="${basefile%.*}"
+        extension="${basefile##*.}"
+        upperfile=$(echo "$filename" | tr '[:lower:]' '[:upper:]' | tr -s ' ' '_' | tr -s '[:punct:]' '_')
+        upperfile="$upperfile.$extension"
+
+        if [[ "$basefile" != "$upperfile" ]]; then
+            echo "Renaming $basefile to $upperfile"
+            mv "$path" "$(dirname "$path")/$upperfile"
+
+            if [[ ! "$upperfile" =~ ^[A-Z_0-9]+\.md$ ]]; then
+                echo "Error: $upperfile still does not conform to UPPER_CASE.md naming convention"
+                exit 1
+            fi
+        fi
+      done
+    language: system

@@ -1,3 +1,0 @@
-# Named `kubectl craft`
-
-Post-pivot (ADR-0003) the project needed a compose-flavored name. We chose `kubectl craft` (binary `kubectl-craft`, module `github.com/thezmc/kubectl-craft`): short, free in the Krew index, and collision-free in the ecosystem. Notably we **rejected `kubectl compose`** despite it being our own glossary verb — next to "kubectl", "compose" reads as docker-compose territory (the `kompose` converter already owns that association) and would misrepresent the tool. `docs`/`explore`/`doc`/`apidocs` were ruled out earlier by Krew collisions or near-collisions; `draft` carries Microsoft's deprecated draft.sh baggage. The glossary verb remains **Compose**; the brand is **craft**.
