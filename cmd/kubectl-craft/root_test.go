@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -169,6 +170,27 @@ var _ = Describe("the root command", func() {
 		for _, flag := range []string{"context", "kubeconfig", "namespace"} {
 			Expect(cmd.Flags().Lookup(flag)).NotTo(BeNil(), "--%s should be registered", flag)
 		}
+	})
+
+	When("invoked with --version", func() {
+		It("reports the build-stamped version without touching a cluster or launching a Session", func() {
+			shell := func(
+				context.Context, []data.Kind, data.Fetcher, []data.GroupVersion,
+				data.Validator, string, *tui.DeepLink,
+			) (tui.Result, error) {
+				Fail("--version must answer before a Session ever launches")
+				return tui.Result{}, nil
+			}
+			cmd := newRootCommand(shell)
+			var out strings.Builder
+			cmd.SetOut(&out)
+			cmd.SetArgs([]string{"--version"})
+
+			Expect(cmd.Execute()).To(Succeed())
+			Expect(out.String()).To(Equal("kubectl-craft version dev\n"),
+				"a locally built binary identifies itself as dev; goreleaser stamps the real version "+
+					"over it at release time via -X main.version, so bug reports carry a version")
+		})
 	})
 
 	When("the Session's cluster serves OpenAPI v3 Documents and discovery", func() {

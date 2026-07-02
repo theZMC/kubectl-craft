@@ -23,9 +23,7 @@ ______________________________________________________________________
 
 [![CI](https://github.com/theZMC/kubectl-craft/actions/workflows/ci.yaml/badge.svg)](https://github.com/theZMC/kubectl-craft/actions/workflows/ci.yaml)
 [![Go version](https://img.shields.io/github/go-mod/go-version/theZMC/kubectl-craft)](go.mod)
-
-<!-- TODO(license): Apache-2.0 is chosen; the LICENSE file and its badge land
-with the release issue (#64). -->
+[![License](https://img.shields.io/github/license/theZMC/kubectl-craft)](LICENSE)
 
 A `kubectl` plugin that presents a TUI for **composing** Kubernetes
 **Manifests** from the **Type Schemas** defined on the cluster your current
@@ -37,15 +35,15 @@ substrate; composing is the product. The tool never mutates the cluster.
 
 ## Demo
 
+![kubectl craft composing a Gadget: pick a Kind, search a Field Path, fill values, Validate to a CEL finding, jump to it, fix it, revalidate, Emit](https://github.com/theZMC/kubectl-craft/releases/latest/download/demo.gif)
+
 The demo is scripted in [`demo.tape`](demo.tape) and reproducible in one command
 (`mise run demo:render`, a [vhs](https://github.com/charmbracelet/vhs) recording
 against a throwaway k3d cluster) — see
 [CONTRIBUTING.md — Demo](CONTRIBUTING.md#demo) for the recipe. The rendered GIF
-is published with releases rather than committed (it outweighs the repo's
-large-file cap); until the first release the tape is the demo's source of truth.
-
-<!-- TODO(#64): attach the rendered demo.gif to the v0.1.0 release and embed
-it here. -->
+is published as a release asset rather than committed (it outweighs the repo's
+large-file cap); the release workflow re-renders it from the tape on every tag,
+so the recording above is exactly as fresh as the release it shipped with.
 
 The signature loop it records: pick a Kind, `/`-search a Field Path, fill
 values, `v` Validate (a CEL violation marks the offending tree node), `n` jump

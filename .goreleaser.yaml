@@ -47,3 +47,71 @@ changelog:
     - '^docs'
     - '^test'
     - '^chore'
+
+release:
+  extra_files:
+  # The README and the notes below embed the demo recording from the
+  # release's assets; the release workflow renders it fresh from demo.tape
+  # before goreleaser runs, so a missing GIF fails the release rather than
+  # shipping a 404 image.
+  - glob: ./demo.gif
+  # Hand-written release summary rendered above the generated changelog.
+  # This prose is release-specific: rewrite it as part of preparing every
+  # release tag.
+  header: |
+    kubectl-craft is a kubectl plugin that presents a TUI for composing
+    Kubernetes Manifests from the Type Schemas defined on the cluster your
+    current context points to: navigate a Kind's field tree with per-field
+    documentation alongside, fill values with type-appropriate widgets,
+    Validate against the live API server, and emit the finished Manifest to
+    stdout. The tool never mutates the cluster.
+
+    ![kubectl craft composing a Gadget: pick a Kind, search a Field Path, fill values, Validate to a CEL finding, jump to it, fix it, revalidate, Emit](https://github.com/theZMC/kubectl-craft/releases/download/v0.1.0/demo.gif)
+
+    ## Highlights of v0.1.0
+
+    - **Compose from live Type Schemas** — the field tree, docs,
+      requiredness, enums, constraints, and defaults come from your
+      cluster's OpenAPI v3 documents (CRDs included), cached on disk and
+      validated against the live index every Session.
+    - **Server-side Validate with fix-by-jumping** — `v` submits the Draft
+      as a server-side dry-run (full schema validation, CRD CEL rules, and
+      admission webhooks run for real; nothing persists); findings annotate
+      the offending tree nodes and `n` jumps through them.
+    - **Version switch with carry-over** — `V` switches the open Kind's
+      version, carrying values over by Field Path with a drop report for
+      anything that would not survive.
+    - **Clean-stdout emission** — the TUI renders to the terminal; stdout
+      carries nothing but the final Emitted Manifest, so
+      `kubectl craft > x.yaml` just works.
+    - **Sparse Manifests** — the emitted YAML contains exactly the fields
+      you set (plus the apiVersion/kind identity); schema defaults render
+      as dimmed placeholders, never in the output.
+
+    See the [README](https://github.com/theZMC/kubectl-craft#contracts) for
+    the full contracts: clean stdout, sparse emission, nothing persists,
+    and a disposable cache.
+
+    ## Known limitations
+
+    - **No Windows artifacts**: the TUI acquires its terminal via
+      `/dev/tty`, which does not exist on Windows, so shipped archives
+      could never run
+      ([#15](https://github.com/theZMC/kubectl-craft/issues/15) records the
+      decision). Linux and macOS (amd64 and arm64) are supported.
+    - The **expanded-output toggle** (emitting defaults alongside set
+      fields) has not landed yet; emission is sparse-only.
+    - Explicitly post-v0.1: OpenAPI v2 fallback (clusters older than
+      roughly 1.24 fail with a clear minimum-version error), round-trip
+      editing of existing manifests + draft recovery, multi-manifest
+      workspaces, Draft-scoped search, in-TUI context switching, and
+      rebindable keys.
+
+    ## Install
+
+    Download the archive for your platform below, extract it, and put the
+    `kubectl-craft` binary anywhere on your `PATH` — kubectl discovers
+    plugins by the binary naming convention, so `kubectl craft` works
+    immediately. Checksums are in `checksums.txt`.
+
+    ______________________________________________________________________

@@ -38,6 +38,12 @@ jobs:
       with:
         cache: true
     - run: goreleaser check
+    # Rehearse the release job's demo render on the PR loop: the tag-push
+    # job runs the same task and ships the result as a release asset, so a
+    # render broken by a build-relevant change must fail here, not on the
+    # release tag.
+    - name: Render the demo GIF the release job will ship
+      run: mise run demo:render
     - name: Build a snapshot release (publishes nothing)
       run: goreleaser release --snapshot --clean
 
@@ -57,6 +63,14 @@ jobs:
         cache: true
     # Fail fast on config drift that skipped the PR snapshot path.
     - run: goreleaser check
+    # The demo GIF ships as a release asset (extra_files in .goreleaser.yaml)
+    # that the README and the release notes embed, so render it fresh from
+    # demo.tape against a throwaway k3d cluster (the task installs its own
+    # pinned vhs/ttyd/ffmpeg/k3d toolchain; the runner provides Docker). A
+    # failed render fails the job before anything publishes — re-run the
+    # workflow rather than shipping a release whose demo image 404s.
+    - name: Render the demo GIF shipped as a release asset
+      run: mise run demo:render
     - name: Publish the tagged GitHub Release
       run: goreleaser release --clean
       env:
