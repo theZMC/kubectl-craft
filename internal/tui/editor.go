@@ -1,11 +1,14 @@
 package tui
 
 import (
+	"bytes"
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"gopkg.in/yaml.v3"
 
 	"github.com/thezmc/kubectl-craft/internal/schema"
 )
@@ -27,6 +30,12 @@ const (
 	// editorSelect is the enum select list: ↑/↓ choose among the Type
 	// Schema's admissible values, Enter confirms.
 	editorSelect
+	// editorRawYAML is the raw-YAML escape hatch's multiline text area
+	// (DESIGN.md — Flow §4): the widget a schema-blind leaf opens instead
+	// of a typed one. Enter types a newline, so Ctrl-s confirms — the
+	// buffer parses on confirm and grafts into the Draft at the leaf's
+	// Field Path; a parse rejection renders inline and commits nothing.
+	editorRawYAML
 )
 
 // widgetFor picks the widget for a leaf from its Metadata(): an enum takes
@@ -118,6 +127,25 @@ func (e fieldEditor) update(key tea.KeyMsg) fieldEditor {
 		return e.updateToggle(key)
 	case editorSelect:
 		return e.updateSelect(key)
+	case editorRawYAML:
+		return e.updateRawYAML(key)
+	default:
+		return e.updateText(key)
+	}
+}
+
+// updateRawYAML types into the raw-YAML text area: Enter breaks the line
+// (Ctrl-s is the confirm, the caller's business) and Tab types the two-space
+// indent step — YAML forbids tab indentation, so a literal tab could only
+// ever be a parse rejection. Everything else is the text widget's grammar.
+func (e fieldEditor) updateRawYAML(key tea.KeyMsg) fieldEditor {
+	switch key.Type {
+	case tea.KeyEnter:
+		e.input += "\n"
+		return e
+	case tea.KeyTab:
+		e.input += "  "
+		return e
 	default:
 		return e.updateText(key)
 	}
@@ -235,6 +263,10 @@ func (e fieldEditor) inlineValue() string {
 		return strconv.FormatBool(e.toggle)
 	case editorSelect:
 		return e.meta.Enum[e.cursor]
+	case editorRawYAML:
+		// The multiline buffer lives in the detail pane; the tree row
+		// just says the escape hatch is composing here.
+		return "raw YAML — editing"
 	default:
 		return e.input + "▏"
 	}
@@ -248,6 +280,8 @@ func (e fieldEditor) hints() string {
 		return "space/←/→ toggle · enter confirm · esc cancel"
 	case editorSelect:
 		return "↑/↓ choose · enter confirm · esc cancel"
+	case editorRawYAML:
+		return "type raw YAML · enter newline · ctrl+s confirm · esc cancel"
 	default:
 		return "type a value · enter confirm · esc cancel"
 	}
@@ -257,7 +291,11 @@ func (e fieldEditor) hints() string {
 // widget itself, and the inline rejection when the last confirm was turned
 // away.
 func (e fieldEditor) viewLines() []string {
-	lines := []string{highlightedStyle.Render(e.row.label), "editing — " + e.meta.Type, ""}
+	editing := "editing — " + e.meta.Type
+	if e.kind == editorRawYAML {
+		editing = "composing raw YAML — the Type Schema is blind here"
+	}
+	lines := []string{highlightedStyle.Render(e.row.label), editing, ""}
 	lines = append(lines, e.widgetLines()...)
 	if e.rejection != "" {
 		lines = append(lines, "", highlightedStyle.Render(e.rejection))
@@ -281,6 +319,9 @@ func (e fieldEditor) widgetLines() []string {
 			lines = append(lines, cursor+value)
 		}
 		return lines
+	case editorRawYAML:
+		// The multiline buffer, cursor on its last line.
+		return strings.Split(e.input+"▏", "\n")
 	default:
 		return []string{"> " + e.input + "▏"}
 	}
@@ -293,4 +334,37 @@ func radioLine(on bool) string {
 		trueMark, falseMark = "(•)", "( )"
 	}
 	return trueMark + " true   " + falseMark + " false"
+}
+
+// graftYAMLText spells a raw-YAML graft's parsed value back as canonical
+// two-space YAML — the text the escape hatch reopens on and the $EDITOR
+// pop-out writes out. The Draft stores the parsed value, so content
+// round-trips while spelling normalizes (mirroring Emit's contract).
+func graftYAMLText(data any) string {
+	var buffer bytes.Buffer
+	encoder := yaml.NewEncoder(&buffer)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(data); err != nil {
+		return fmt.Sprint(data)
+	}
+	_ = encoder.Close()
+	return buffer.String()
+}
+
+// graftLines splits a graft's canonical YAML spelling into display lines.
+func graftLines(data any) []string {
+	return strings.Split(strings.TrimRight(graftYAMLText(data), "\n"), "\n")
+}
+
+// graftSummary is a grafted subtree's distinct one-line rendering — "raw
+// YAML (N lines)" — for the tree row, the detail pane, and the unset
+// confirm: a graft is opaque to the Type Schema, so its size is what there
+// is to say about it.
+func graftSummary(data any) string {
+	count := len(graftLines(data))
+	noun := "lines"
+	if count == 1 {
+		noun = "line"
+	}
+	return fmt.Sprintf("raw YAML (%d %s)", count, noun)
 }

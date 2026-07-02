@@ -179,6 +179,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.documentFetchFailed(msg)
 	case returnToPickerMsg:
 		return m.returnToPicker(), nil
+	case editorFinishedMsg:
+		if m.view == composing {
+			m.compose = m.compose.editorFinished(msg)
+		}
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	}

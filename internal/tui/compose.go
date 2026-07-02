@@ -24,7 +24,7 @@ const (
 	// Schema can't describe (x-kubernetes-preserve-unknown-fields or a
 	// plain untyped object).
 	schemaBlindNote = "The Type Schema can't describe what goes here; " +
-		"the raw-YAML escape hatch composes it, and its editor isn't wired yet."
+		"Enter composes it as raw YAML, and e pops the subtree out to $EDITOR."
 
 	// composeHints is the compose view's one-line hint bar in navigate
 	// mode (DESIGN.md — Keybindings: k9s-style, the handful of keys for
@@ -71,16 +71,19 @@ const helpText = `Compose view — navigate mode
   enter      open the value widget on a leaf; toggle expansion on a parent
   a          append an item on an array node; prompt for a key on a map node
   d          unset the focused value — a subtree with filled values confirms the discard count first
+  e          pop a schema-blind subtree out to $EDITOR as raw YAML
   g / G      jump to the top / bottom of the tree
   /          search the Kind's Field Paths and jump to a match
   ?          open this help
 
 Edit mode — Enter on a leaf opens its type-appropriate widget
+(a schema-blind leaf opens the raw-YAML text area instead)
 
   enter      confirm the value into the Draft; rejections render inline
   esc        cancel back to navigate mode without touching the Draft
   space ←/→  flip a boolean toggle
   ↑/↓        choose from an enum select
+  ctrl+s     confirm the raw-YAML text area — enter types its newlines
 
   esc        return to the Kind picker — a non-empty Draft warns before discarding
   q          quit — a non-empty Draft warns first (the three-way exit ramp lands with emission)
@@ -206,6 +209,10 @@ type compose struct {
 	// descendants; nil otherwise. y/Enter discards, n/Esc keeps — no undo
 	// in MVP, so the confirm is the safety net (DESIGN.md — Keybindings).
 	unset *unsetConfirm
+
+	// popOut is `e`'s in-flight $EDITOR pop-out — the subtree the editor
+	// holds while the Session's terminal is handed over; nil otherwise.
+	popOut *popOut
 
 	// discard is the open discard confirm over a non-empty Draft — Esc's
 	// return to the picker or `q`'s quit; discardNone otherwise. Enter
@@ -531,6 +538,8 @@ func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
 		return c.pressAdd(), nil
 	case "d":
 		return c.pressUnset(), nil
+	case "e":
+		return c.pressPopOut()
 	case "?":
 		c.helpOpen = true
 		return c, nil
@@ -542,16 +551,21 @@ func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
 	return c, nil
 }
 
-// updateEditor routes one key press into the open value widget: Enter
-// confirms the value into the Draft, Esc cancels back to navigate mode
+// updateEditor routes one key press into the open value widget: the confirm
+// key confirms the value into the Draft, Esc cancels back to navigate mode
 // without mutating, and every other key is the widget's own — navigate keys
-// never move the tree while editing.
+// never move the tree while editing. The raw-YAML text area confirms on
+// Ctrl-s instead of Enter, which types its newlines.
 func (c compose) updateEditor(key tea.KeyMsg) compose {
+	confirm := "enter"
+	if c.editor.kind == editorRawYAML {
+		confirm = "ctrl+s"
+	}
 	switch key.String() {
 	case "esc":
 		c.editor = nil
 		return c
-	case "enter":
+	case confirm:
 		return c.confirmEditor()
 	}
 	edited := c.editor.update(key)
@@ -559,14 +573,20 @@ func (c compose) updateEditor(key tea.KeyMsg) compose {
 	return c
 }
 
-// confirmEditor confirms the widget's value into the Draft. A rejection —
-// the widget's own parse or the Draft's schema-local check — renders inline
-// in the widget and commits nothing; a confirmed value closes the widget
-// and recomputes the Draft's completeness.
+// confirmEditor confirms the widget's value into the Draft — the raw-YAML
+// text area grafts its parsed buffer, every other widget Sets its scalar. A
+// rejection — the widget's own parse, the graft's, or the Draft's
+// schema-local check — renders inline in the widget and commits nothing; a
+// confirmed value closes the widget and recomputes the Draft's completeness.
 func (c compose) confirmEditor() compose {
-	value, err := c.editor.confirmValue()
-	if err == nil {
-		err = c.draft.Set(c.editor.path, value)
+	var err error
+	if c.editor.kind == editorRawYAML {
+		err = c.draft.GraftYAML(c.editor.path, c.editor.input)
+	} else {
+		var value any
+		if value, err = c.editor.confirmValue(); err == nil {
+			err = c.draft.Set(c.editor.path, value)
+		}
 	}
 	if err != nil {
 		edited := *c.editor
@@ -627,16 +647,22 @@ type keyPrompt struct {
 
 // unsetConfirm is `d`'s destructive confirm: the row being unset, its
 // Draft-level Field Path, and how many filled values the Draft reports the
-// unset would discard.
+// unset would discard — or, on a grafted subtree, the graft's parsed value,
+// whose size speaks for the discard instead of the count (the Draft counts
+// a whole graft as one).
 type unsetConfirm struct {
 	row   *treeRow
 	path  string
 	count int
+	graft any
 }
 
 // prompt is the confirm's footer line, count included — the "how much am I
 // about to lose" the Draft layer feeds the destructive key.
 func (u unsetConfirm) prompt() string {
+	if u.graft != nil {
+		return fmt.Sprintf("discard the %s grafted at %s? y/enter discard · n/esc keep", graftSummary(u.graft), u.path)
+	}
 	noun := "values"
 	if u.count == 1 {
 		noun = "value"
@@ -786,7 +812,14 @@ func (c compose) pressUnset() compose {
 		return c
 	}
 
-	if _, filledHere := c.draft.ValueAt(path); count == 0 || (count == 1 && filledHere) {
+	value, filledHere := c.draft.ValueAt(path)
+	if value.Type == schema.TypeRawYAML {
+		// A graft is a whole subtree behind one Draft entry, so it takes
+		// the subtree confirm — sized by the graft itself, not the count.
+		c.unset = &unsetConfirm{row: row, path: path, count: count, graft: value.Data}
+		return c
+	}
+	if count == 0 || (count == 1 && filledHere) {
 		// The row's own value (or an instantiated-but-empty item or key):
 		// nothing beneath it is lost, so the unset is instant.
 		return c.performUnset(row, path)
@@ -1072,21 +1105,17 @@ func (c compose) pressEnter() compose {
 	return c.openEditor(row)
 }
 
-// openEditor opens the leaf's value widget. A leaf no widget can serve
-// leaves a one-line hint instead of opening anything: a schema-blind leaf
-// routes to the raw-YAML escape hatch, a leaf inside an uninstantiated
-// placeholder subtree needs an item or key first (`a` on the collection),
-// and a leaf without a scalar type has nothing to type into. An instantiated
-// item or key leaf edits exactly like an ordinary leaf.
+// openEditor opens the leaf's value widget: a schema-blind leaf opens the
+// raw-YAML text area — the escape hatch (DESIGN.md — Flow §4) — and every
+// other leaf its type-appropriate widget. A leaf no widget can serve leaves
+// a one-line hint instead of opening anything: a leaf inside an
+// uninstantiated placeholder subtree needs an item or key first (`a` on the
+// collection), and a leaf without a scalar type has nothing to type into.
+// An instantiated item or key leaf edits exactly like an ordinary leaf.
 func (c compose) openEditor(row *treeRow) compose {
 	meta, err := row.node.Metadata()
 	if err != nil {
 		// The detail pane already surfaces the resolution error.
-		return c
-	}
-	if meta.SchemaBlind {
-		c.notice = "the Type Schema can't describe " + row.node.FieldPath() +
-			" — raw YAML composes it, and the escape hatch's editor isn't wired yet"
 		return c
 	}
 	path, addressable := row.draftFieldPath()
@@ -1094,6 +1123,9 @@ func (c compose) openEditor(row *treeRow) compose {
 		c.notice = row.node.FieldPath() + " sits under an uninstantiated collection — " +
 			"press a on the collection node to add its first item or key"
 		return c
+	}
+	if meta.SchemaBlind {
+		return c.openRawYAMLEditor(row, path, meta)
 	}
 	kind, editable := widgetFor(meta)
 	if !editable {
@@ -1104,6 +1136,19 @@ func (c compose) openEditor(row *treeRow) compose {
 
 	value, filled := c.draft.ValueAt(path)
 	editor := newFieldEditor(row, path, meta, kind, value, filled)
+	c.editor = &editor
+	return c
+}
+
+// openRawYAMLEditor opens the raw-YAML text area over a schema-blind leaf:
+// a graft the Draft already holds prefills the buffer in its canonical
+// spelling, so editing amends instead of retyping; otherwise it starts
+// empty.
+func (c compose) openRawYAMLEditor(row *treeRow, path string, meta schema.Metadata) compose {
+	editor := fieldEditor{row: row, path: path, meta: meta, kind: editorRawYAML}
+	if value, filled := c.draft.ValueAt(path); filled && value.Type == schema.TypeRawYAML {
+		editor.input = strings.TrimRight(graftYAMLText(value.Data), "\n")
+	}
 	c.editor = &editor
 	return c
 }
@@ -1267,27 +1312,35 @@ func (c compose) hints() string {
 // navigateHints prepends the mutation verbs the focused row serves right now
 // (DESIGN.md — Keybindings: the hint bar is contextual to the focused view):
 // `a` on an array or map-shaped node, `d` wherever the Draft holds something
-// to unset — and neither on rows they would no-op on.
+// to unset, `e` on a schema-blind node — and none on rows they would no-op
+// on.
 func (c compose) navigateHints() string {
 	row := c.focused()
 	if row == nil || !row.loaded {
 		return composeHints
 	}
 	path, addressable := row.draftFieldPath()
-	if !addressable {
+	if !addressable || path == "" {
 		return composeHints
 	}
+	return c.rowVerbs(row, path) + composeHints
+}
 
+// rowVerbs spells the hint-bar verbs an addressable, non-root row serves.
+func (c compose) rowVerbs(row *treeRow, path string) string {
 	verbs := ""
-	if items, value := collectionPlaceholders(row); path != "" && items != nil {
+	if items, value := collectionPlaceholders(row); items != nil {
 		verbs += "a append item · "
-	} else if path != "" && value != nil {
+	} else if value != nil {
 		verbs += "a add key · "
 	}
-	if _, held := c.draft.DiscardCount(path); held && path != "" {
+	if _, held := c.draft.DiscardCount(path); held {
 		verbs += "d unset · "
 	}
-	return verbs + composeHints
+	if meta, err := row.node.Metadata(); err == nil && meta.SchemaBlind {
+		verbs += "e $EDITOR · "
+	}
+	return verbs
 }
 
 // bodyView renders the pane area: the `?` help overlay or the `/` search
@@ -1386,16 +1439,32 @@ func (c compose) rowValue(row *treeRow) string {
 	if !row.loaded || !row.leaf || row.kind == rowPlaceholder {
 		return ""
 	}
-	if path, addressable := row.draftFieldPath(); addressable {
-		if value, filled := c.draft.ValueAt(path); filled {
-			return ": " + renderScalar(value.Data)
-		}
+	if spelled, filled := c.draftRowValue(row); filled {
+		return spelled
 	}
 	meta, err := row.node.Metadata()
 	if err != nil || meta.Default == nil {
 		return ""
 	}
 	return dimmedStyle.Render(": " + renderScalar(meta.Default))
+}
+
+// draftRowValue spells the value the Draft holds at the row, when one is
+// filled there — a grafted subtree rendering distinctly: opaque to the Type
+// Schema, sized instead of spelled inline.
+func (c compose) draftRowValue(row *treeRow) (string, bool) {
+	path, addressable := row.draftFieldPath()
+	if !addressable {
+		return "", false
+	}
+	value, filled := c.draft.ValueAt(path)
+	if !filled {
+		return "", false
+	}
+	if value.Type == schema.TypeRawYAML {
+		return ": " + graftSummary(value.Data), true
+	}
+	return ": " + renderScalar(value.Data), true
 }
 
 // detailPane renders the focused node's detail: its Metadata() when it
@@ -1429,7 +1498,23 @@ func (c compose) detailLines() []string {
 	if err != nil {
 		return []string{highlightedStyle.Render(row.label), "", "reading this field's Type Schema failed: " + err.Error()}
 	}
-	return metadataLines(row, meta, c.rowMissingRequired(row))
+	return append(metadataLines(row, meta, c.rowMissingRequired(row)), c.graftDetailLines(row)...)
+}
+
+// graftDetailLines renders the raw-YAML graft the Draft holds at the focused
+// row — its distinct summary and the grafted YAML itself — and nothing when
+// no graft sits there.
+func (c compose) graftDetailLines(row *treeRow) []string {
+	path, addressable := row.draftFieldPath()
+	if !addressable {
+		return nil
+	}
+	value, filled := c.draft.ValueAt(path)
+	if !filled || value.Type != schema.TypeRawYAML {
+		return nil
+	}
+	lines := []string{"", "grafted: " + graftSummary(value.Data), ""}
+	return append(lines, graftLines(value.Data)...)
 }
 
 // metadataLines renders one node's Metadata() for the detail pane: display

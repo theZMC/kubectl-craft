@@ -88,18 +88,6 @@ var _ = Describe("edit mode", func() {
 			Expect(model.ComposeOpen()).To(BeTrue())
 		})
 
-		It("leaves a hint on a schema-blind leaf — raw YAML composes it, not a typed widget", func() {
-			model := focusField(composeGadget(), "spec.tuning")
-
-			model, _ = press(model, enterKey)
-
-			Expect(model.Editing()).To(BeFalse())
-			notice, showing := model.Notice()
-			Expect(showing).To(BeTrue())
-			Expect(notice).To(ContainSubstring("raw YAML"),
-				"the raw-YAML escape hatch is the schema-blind node's editor, and it isn't wired yet")
-		})
-
 		It("leaves a hint on an uninstantiated [items] placeholder row — a on the collection adds the first item", func() {
 			model := expandField(composeGadget(), "spec.gears")
 			model, _ = press(model, keyRune('j')) // the [items] row shares its parent's Field Path
