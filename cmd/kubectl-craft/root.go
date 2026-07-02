@@ -6,16 +6,21 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	"k8s.io/cli-runtime/pkg/genericiooptions"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 )
+
+// sessionShell launches the presentation layer for a Session whose live
+// index serves groupCount API groups. Production wiring passes tui.Run;
+// command specs inject a recorder so they can observe the launch without
+// a controlling terminal.
+type sessionShell func(ctx context.Context, groupCount int) error
 
 // newRootCommand wires the standard kubectl plugin flags
 // (genericclioptions.ConfigFlags: --context, --kubeconfig, --namespace, …)
 // into the root command. The context those flags resolve is fixed for the
 // Session — switching clusters means starting a new Session.
-func newRootCommand(streams genericiooptions.IOStreams) *cobra.Command {
+func newRootCommand(shell sessionShell) *cobra.Command {
 	configFlags := genericclioptions.NewConfigFlags(true)
 
 	cmd := &cobra.Command{
@@ -26,7 +31,7 @@ func newRootCommand(streams genericiooptions.IOStreams) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runSession(cmd.Context(), configFlags, streams)
+			return runSession(cmd.Context(), configFlags, shell)
 		},
 	}
 
@@ -36,13 +41,14 @@ func newRootCommand(streams genericiooptions.IOStreams) *cobra.Command {
 }
 
 // runSession connects to the cluster the Session's resolved context points
-// to and fetches the live OpenAPI v3 index. An unreachable cluster or a
-// cluster that doesn't serve OpenAPI v3 hard-fails here — before any TUI
-// could launch — surfacing as a non-zero exit (DESIGN.md — Data layer).
+// to, fetches the live OpenAPI v3 index, and only then launches the Session
+// shell. An unreachable cluster or a cluster that doesn't serve OpenAPI v3
+// hard-fails here — before the alt screen ever opens — surfacing on stderr
+// as a non-zero exit (DESIGN.md — Data layer).
 func runSession(
 	ctx context.Context,
 	configFlags *genericclioptions.ConfigFlags,
-	streams genericiooptions.IOStreams,
+	shell sessionShell,
 ) error {
 	restConfig, err := configFlags.ToRESTConfig()
 	if err != nil {
@@ -59,12 +65,5 @@ func runSession(
 		return fmt.Errorf("connecting the Session to the cluster: %w", err)
 	}
 
-	// Plain output until the TUI lands (separate M0 issue): prove the
-	// data layer end-to-end by reporting what the live index serves.
-	_, _ = fmt.Fprintln(streams.Out, placeholder())
-	_, _ = fmt.Fprintf(streams.Out,
-		"connected: %d group versions serve OpenAPI v3 Documents on this cluster\n",
-		len(groups))
-
-	return nil
+	return shell(ctx, len(groups))
 }

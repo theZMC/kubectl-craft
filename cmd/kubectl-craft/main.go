@@ -8,25 +8,15 @@ import (
 	"fmt"
 	"os"
 
-	"k8s.io/cli-runtime/pkg/genericiooptions"
+	"github.com/thezmc/kubectl-craft/internal/tui"
 )
 
 // version is injected at build time by goreleaser via ldflags
 // (-X main.version=...); "dev" identifies a locally built binary.
 var version = "dev"
 
-// placeholder returns the walking-skeleton banner printed until the
-// binary can Compose Manifests from a cluster's Type Schemas.
-func placeholder() string {
-	return fmt.Sprintf(
-		"kubectl-craft %s: compose Kubernetes Manifests from your cluster's live Type Schemas (walking skeleton)",
-		version,
-	)
-}
-
 func main() {
-	streams := genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr}
-	if err := newRootCommand(streams).Execute(); err != nil {
+	if err := newRootCommand(tui.Run).Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}

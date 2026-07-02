@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -13,14 +16,19 @@ func TestKubectlCraft(t *testing.T) {
 }
 
 var _ = Describe("the kubectl-craft binary", func() {
-	Context("before a Session can Compose Manifests", func() {
-		It("prints a walking-skeleton placeholder", func() {
-			Expect(placeholder()).To(ContainSubstring("kubectl-craft"))
-			Expect(placeholder()).To(ContainSubstring("Type Schemas"))
+	It("reports the build-time version via --version without starting a Session", func() {
+		out := &bytes.Buffer{}
+		launched := false
+		cmd := newRootCommand(func(context.Context, int) error {
+			launched = true
+			return nil
 		})
+		cmd.SetOut(out)
+		cmd.SetErr(io.Discard)
+		cmd.SetArgs([]string{"--version"})
 
-		It("includes the build-time version in the banner", func() {
-			Expect(placeholder()).To(ContainSubstring(version))
-		})
+		Expect(cmd.Execute()).To(Succeed())
+		Expect(out.String()).To(ContainSubstring(version))
+		Expect(launched).To(BeFalse(), "--version must answer without a Session shell")
 	})
 })
