@@ -17,6 +17,7 @@ env:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v7
     # Installs the pinned toolchain (go, golangci-lint, ...) from
@@ -29,6 +30,7 @@ jobs:
 
   fast:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
     - uses: actions/checkout@v7
     - uses: jdx/mise-action@v4
@@ -41,10 +43,13 @@ jobs:
     # GitHub-hosted ubuntu runners ship with Docker, which the integration
     # loop (testcontainers-go k3s) requires.
     runs-on: ubuntu-latest
+    # A hung container boot must fail the job, not burn the 6-hour default.
+    timeout-minutes: 20
     steps:
     - uses: actions/checkout@v7
     - uses: jdx/mise-action@v4
       with:
         cache: true
     - name: Run every suite, including integration specs
-      run: go run github.com/onsi/ginkgo/v2/ginkgo ./...
+      # -p keeps the cross-process kubeconfig broadcast honest in CI.
+      run: go run github.com/onsi/ginkgo/v2/ginkgo -p ./...
