@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -18,15 +19,17 @@ import (
 // (the disk cache over the live client in production — ADR-0002), the
 // live /openapi/v3 index whose content hashes address every lazy fetch,
 // and the launch arg's resolved deep link when one was given (nil opens
-// the Kind picker). Production wiring passes tui.Run; command specs inject
-// a recorder so they can observe the launch without a controlling terminal.
+// the Kind picker). It returns the Session's Result — the emit decision
+// and the Emitted Manifest's bytes — once the alt screen has closed.
+// Production wiring passes tui.Run; command specs inject a recorder so
+// they can observe the launch without a controlling terminal.
 type sessionShell func(
 	ctx context.Context,
 	kinds []data.Kind,
 	fetcher data.Fetcher,
 	index []data.GroupVersion,
 	link *tui.DeepLink,
-) error
+) (tui.Result, error)
 
 // rootLong documents the deep-link arg in kubectl explain's syntax: the
 // launch surface DESIGN.md — Flow §1 promises, and the k9s-plugin
@@ -67,7 +70,7 @@ func newRootCommand(shell sessionShell) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runSession(cmd.Context(), configFlags, shell, deepLinkArg(args))
+			return runSession(cmd.Context(), configFlags, shell, deepLinkArg(args), cmd.OutOrStdout())
 		},
 	}
 
@@ -95,11 +98,18 @@ func deepLinkArg(args []string) string {
 // — surfacing on stderr as a non-zero exit (DESIGN.md — Data layer). Group
 // documents are not fetched here: they load lazily, per group, on the
 // first open of one of its Kinds.
+//
+// When the Session ends on an emit ramp, the Emitted Manifest's bytes are
+// written to stdout here — after the shell has returned and the alt screen
+// has closed, never from inside the TUI (DESIGN.md — Output) — so
+// `kubectl craft > x.yaml` captures exactly the Manifest. A discard ramp
+// writes nothing, and every ramp exits zero.
 func runSession(
 	ctx context.Context,
 	configFlags *genericclioptions.ConfigFlags,
 	shell sessionShell,
 	arg string,
+	stdout io.Writer,
 ) error {
 	restConfig, err := configFlags.ToRESTConfig()
 	if err != nil {
@@ -135,7 +145,17 @@ func runSession(
 		}
 	}
 
-	return shell(ctx, kinds, fetcher, index, link)
+	result, err := shell(ctx, kinds, fetcher, index, link)
+	if err != nil {
+		return err
+	}
+	if !result.Emitted {
+		return nil
+	}
+	if _, err := stdout.Write(result.Manifest); err != nil {
+		return fmt.Errorf("writing the Emitted Manifest to stdout: %w", err)
+	}
+	return nil
 }
 
 // resolveDeepLink resolves the positional deep-link arg — kubectl-explain

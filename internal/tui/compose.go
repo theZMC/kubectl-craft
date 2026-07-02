@@ -31,7 +31,7 @@ const (
 	// the focused view; `?` opens the full map). The mutation verbs `a`
 	// and `d` prepend contextually — see navigateHints.
 	composeHints = "j/k move · h/l collapse/expand · enter edit/toggle · " +
-		"g/G top/bottom · / search · esc Kind picker · ? help · q quit"
+		"g/G top/bottom · / search · esc Kind picker · ? help · ctrl+d emit · q quit"
 
 	// keyPromptHints is the hint bar while `a`'s inline key prompt is
 	// open on a map-shaped node, in the modal grammar: Enter confirms,
@@ -45,11 +45,10 @@ const (
 	discardToPickerPrompt = "discard the Draft and return to the Kind picker? " +
 		"enter discard · esc keep composing"
 
-	// discardQuitPrompt is the confirm `q` opens over a non-empty Draft —
-	// the interim guard until the exit ramp's three-way prompt lands with
-	// emission (DESIGN.md — Exit ramp): quitting discards the Draft, so
-	// it warns exactly like Esc-to-picker does.
-	discardQuitPrompt = "discard the Draft and quit? enter quit · esc keep composing"
+	// exitMenuHints is the hint bar while `q`'s three-way exit menu is
+	// open (DESIGN.md — Exit ramp), in the modal grammar: Enter confirms
+	// the highlighted ramp, Esc cancels back to composing.
+	exitMenuHints = "↑/↓ choose · enter confirm · esc cancel"
 
 	// transitHints is the hint bar for the loading and error states
 	// between the picker and the compose view.
@@ -60,9 +59,9 @@ const (
 )
 
 // helpText is the `?` full-map help overlay: every key the compose view
-// serves, and nothing it doesn't — Validate, version switching, and the
-// exit ramp's prompt arrive in later issues (DESIGN.md — Keybindings: fixed
-// keys keep the hint bar/help/docs trivially truthful).
+// serves, and nothing it doesn't — Validate and version switching arrive in
+// later issues (DESIGN.md — Keybindings: fixed keys keep the hint
+// bar/help/docs trivially truthful).
 const helpText = `Compose view — navigate mode
 
   j/k, ↑/↓   move focus
@@ -86,8 +85,9 @@ Edit mode — Enter on a leaf opens its type-appropriate widget
   ctrl+s     confirm the raw-YAML text area — enter types its newlines
 
   esc        return to the Kind picker — a non-empty Draft warns before discarding
-  q          quit — a non-empty Draft warns first (the three-way exit ramp lands with emission)
-  ctrl+c     quit immediately
+  q          quit — a non-empty Draft offers Emit & quit / Discard & quit / Cancel
+  ctrl+d     emit the Manifest to stdout and quit — no menu
+  ctrl+c     quit immediately, discarding the Draft
 
 Any key closes this help.`
 
@@ -214,10 +214,15 @@ type compose struct {
 	// holds while the Session's terminal is handed over; nil otherwise.
 	popOut *popOut
 
-	// discard is the open discard confirm over a non-empty Draft — Esc's
-	// return to the picker or `q`'s quit; discardNone otherwise. Enter
-	// discards, Esc keeps composing.
-	discard discardConfirm
+	// discardToPicker reports Esc's open discard confirm over a non-empty
+	// Draft — returning to the picker would discard it. Enter discards,
+	// Esc keeps composing.
+	discardToPicker bool
+
+	// exit is `q`'s open three-way exit menu over a non-empty Draft
+	// (DESIGN.md — Exit ramp): Emit & quit / Discard & quit / Cancel; nil
+	// otherwise.
+	exit *exitMenu
 
 	// notice is the non-fatal one-liner a deep link leaves when its Field
 	// Path doesn't exist in the Type Schema: it takes the hint bar's line
@@ -473,12 +478,13 @@ func appendVisibleRows(rows []*treeRow, row *treeRow) []*treeRow {
 
 // update applies one key press under the modal grammar (DESIGN.md —
 // Keybindings): the help overlay consumes every key first, then the open
-// value widget, the discard confirm, and the search overlay; what remains
-// is navigate mode's command map.
+// value widget, the exit menu, the discard confirm, and the search overlay;
+// what remains is navigate mode's command map.
 func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 	if key.String() == "ctrl+c" {
-		// The conventional escape hatch quits immediately from anywhere,
-		// even through the overlays (DESIGN.md — Exit ramp).
+		// The conventional escape hatch quits immediately from anywhere —
+		// even through the overlays and the exit menu, discarding the
+		// Draft without a prompt (DESIGN.md — Exit ramp).
 		return c, tea.Quit
 	}
 
@@ -499,7 +505,10 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 	if c.unset != nil {
 		return c.updateUnsetConfirm(key), nil
 	}
-	if c.discard != discardNone {
+	if c.exit != nil {
+		return c.updateExitMenu(key)
+	}
+	if c.discardToPicker {
 		return c.updateDiscardConfirm(key)
 	}
 	if c.searchOpen {
@@ -514,15 +523,20 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
 	switch key.String() {
 	case "q":
-		// Quitting discards the Draft, so a non-empty one warns first —
-		// the interim guard until the exit ramp's three-way prompt lands
-		// with emission (DESIGN.md — Exit ramp); an empty Draft quits as
+		// The single exit verb (DESIGN.md — Exit ramp): a non-empty Draft
+		// opens the three-way exit menu — emitting, discarding, and
+		// cancelling all stay one keypress away; an empty Draft quits as
 		// immediately as Ctrl-c.
 		if len(c.draft.Instantiated()) == 0 {
 			return c, tea.Quit
 		}
-		c.discard = discardQuit
+		c.exit = &exitMenu{}
 		return c, nil
+	case "ctrl+d":
+		// The EOF idiom: a direct emit-&-quit, no menu (DESIGN.md — Exit
+		// ramp). An empty Draft emits the identity-only Manifest — the
+		// sparse-emission contract's floor.
+		return c.emitAndQuit()
 	case "esc":
 		// The documented way back to the Kind picker. A non-empty Draft
 		// would be discarded by returning, so it warns first (DESIGN.md —
@@ -530,7 +544,7 @@ func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
 		if len(c.draft.Instantiated()) == 0 {
 			return c, func() tea.Msg { return returnToPickerMsg{} }
 		}
-		c.discard = discardToPicker
+		c.discardToPicker = true
 		return c, nil
 	case "enter":
 		return c.pressEnter(), nil
@@ -599,41 +613,101 @@ func (c compose) confirmEditor() compose {
 	return c
 }
 
-// discardConfirm names the open discard confirm's destination: none, back
-// to the Kind picker (Esc), or out of the Session (`q`).
-type discardConfirm int
-
-const (
-	discardNone discardConfirm = iota
-	discardToPicker
-	discardQuit
-)
-
-// prompt is the confirm's footer line.
-func (d discardConfirm) prompt() string {
-	if d == discardQuit {
-		return discardQuitPrompt
-	}
-	return discardToPickerPrompt
-}
-
-// updateDiscardConfirm applies one key press to the open discard confirm,
-// in the modal grammar: Enter confirms the discard — returning to the Kind
-// picker or quitting, whichever was asked — Esc keeps composing, and
-// everything else is inert.
+// updateDiscardConfirm applies one key press to Esc's open discard confirm,
+// in the modal grammar: Enter confirms the discard and returns to the Kind
+// picker, Esc keeps composing, and everything else is inert.
 func (c compose) updateDiscardConfirm(key tea.KeyMsg) (compose, tea.Cmd) {
-	confirmed := c.discard
 	switch key.String() {
 	case "enter":
-		c.discard = discardNone
-		if confirmed == discardQuit {
-			return c, tea.Quit
-		}
+		c.discardToPicker = false
 		return c, func() tea.Msg { return returnToPickerMsg{} }
 	case "esc":
-		c.discard = discardNone
+		c.discardToPicker = false
 	}
 	return c, nil
+}
+
+// exitOption is one ramp of `q`'s three-way exit menu: its name and what
+// choosing it does to the Draft.
+type exitOption struct {
+	name   string
+	detail string
+}
+
+// exitOptions are the exit menu's ramps in menu order (DESIGN.md — Exit
+// ramp): Emit & quit leads — the ramp composing exists for.
+var exitOptions = []exitOption{
+	{name: "Emit & quit", detail: "write the Manifest to stdout"},
+	{name: "Discard & quit", detail: "quit with nothing emitted"},
+	{name: "Cancel", detail: "keep composing"},
+}
+
+// exitMenu is `q`'s open three-way exit menu over a non-empty Draft: the
+// cursor indexes the highlighted exitOptions ramp.
+type exitMenu struct {
+	cursor int
+}
+
+// updateExitMenu applies one key press to the open exit menu, in the modal
+// grammar: ↑/↓ move the highlight, Enter confirms the highlighted ramp, Esc
+// cancels back to composing, and everything else is inert (Ctrl-c never
+// reaches here — it quits from anywhere first).
+func (c compose) updateExitMenu(key tea.KeyMsg) (compose, tea.Cmd) {
+	menu := *c.exit
+	switch key.String() {
+	case "up", "k":
+		menu.cursor = max(menu.cursor-1, 0)
+	case "down", "j":
+		menu.cursor = min(menu.cursor+1, len(exitOptions)-1)
+	case "esc":
+		c.exit = nil
+		return c, nil
+	case "enter":
+		c.exit = nil
+		switch exitOptions[menu.cursor].name {
+		case "Emit & quit":
+			return c.emitAndQuit()
+		case "Discard & quit":
+			return c, tea.Quit
+		default:
+			return c, nil
+		}
+	}
+	c.exit = &menu
+	return c, nil
+}
+
+// emitAndQuit Emits the Draft as the Manifest and ends the Session on the
+// emit ramp: the bytes travel to the Session shell as a typed message — the
+// shell records them and quits, and the Manifest reaches stdout only after
+// the alt screen closes, never from inside the TUI (DESIGN.md — Output). A
+// failed emission surfaces as a non-fatal notice and keeps composing: the
+// Draft is never lost to a rendering error.
+func (c compose) emitAndQuit() (compose, tea.Cmd) {
+	manifest, err := c.draft.Emit()
+	if err != nil {
+		c.notice = "emitting the Manifest failed: " + err.Error()
+		return c, nil
+	}
+	return c, func() tea.Msg { return manifestEmittedMsg{manifest: manifest} }
+}
+
+// view renders the open exit menu as the body overlay: every ramp on its
+// own line, the highlighted one carrying the cursor — the completeness
+// status line keeps rendering beneath it, so "what would I be emitting" and
+// "how complete is it" coexist.
+func (m exitMenu) view() string {
+	lines := []string{"quit composing — what happens to the Draft?", ""}
+	for index, option := range exitOptions {
+		cursor := "  "
+		name := option.name
+		if index == m.cursor {
+			cursor = "> "
+			name = highlightedStyle.Render(name)
+		}
+		lines = append(lines, cursor+name+" — "+option.detail)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // keyPrompt is `a`'s inline key prompt over a map-shaped node: the collection
@@ -1284,8 +1358,8 @@ func (c compose) footer() string {
 	if c.unset != nil {
 		return highlightedStyle.Render(c.unset.prompt())
 	}
-	if c.discard != discardNone {
-		return highlightedStyle.Render(c.discard.prompt())
+	if c.discardToPicker {
+		return highlightedStyle.Render(discardToPickerPrompt)
 	}
 	if c.notice != "" {
 		return highlightedStyle.Render(c.notice)
@@ -1294,14 +1368,18 @@ func (c compose) footer() string {
 }
 
 // hints is the contextual one-line hint bar: the open value widget's own
-// hints in edit mode, the key prompt's while it is open, the search
-// overlay's while it is open, the navigate-mode hints otherwise.
+// hints in edit mode, the key prompt's while it is open, the exit menu's
+// while it is open, the search overlay's while it is open, the
+// navigate-mode hints otherwise.
 func (c compose) hints() string {
 	if c.editor != nil {
 		return c.editor.hints()
 	}
 	if c.keyPrompt != nil {
 		return keyPromptHints
+	}
+	if c.exit != nil {
+		return exitMenuHints
 	}
 	if c.searchOpen {
 		return searchHints
@@ -1343,11 +1421,15 @@ func (c compose) rowVerbs(row *treeRow, path string) string {
 	return verbs
 }
 
-// bodyView renders the pane area: the `?` help overlay or the `/` search
-// overlay when one is open, the tree and detail panes otherwise.
+// bodyView renders the pane area: the `?` help overlay, the exit menu, or
+// the `/` search overlay when one is open, the tree and detail panes
+// otherwise.
 func (c compose) bodyView() string {
 	if c.helpOpen {
 		return limitLines(helpText, c.bodyHeight())
+	}
+	if c.exit != nil {
+		return limitLines(c.exit.view(), c.bodyHeight())
 	}
 	if c.searchOpen {
 		return limitLines(c.searchView(), c.bodyHeight())

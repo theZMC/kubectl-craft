@@ -346,28 +346,4 @@ var _ = Describe("edit mode", func() {
 			Expect(filled).To(BeFalse(), "the discarded Draft is gone: reopening composes afresh")
 		})
 	})
-
-	When("q quits over a non-empty Draft", func() {
-		It("warns before discarding — the interim guard until the exit ramp's three-way prompt", func() {
-			model := widen(openKind(newShell(), widgetKind()))
-			model = expandField(model, "spec")
-			model = confirmLeaf(model, "spec.size", "5")
-
-			model, cmd := press(model, keyRune('q'))
-			Expect(cmd).To(BeNil(), "a non-empty Draft must not be discarded by a bare keypress")
-			Expect(model.ConfirmingDiscard()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("discard the Draft and quit?"))
-
-			model, _ = press(model, escKey)
-			Expect(model.ConfirmingDiscard()).To(BeFalse())
-			Expect(model.ComposeOpen()).To(BeTrue())
-			Expect(draftValue(model, "spec.size")).To(Equal(int64(5)),
-				"cancelling the confirm keeps composing with the Draft intact")
-
-			model, _ = press(model, keyRune('q'))
-			_, quit := press(model, enterKey)
-			Expect(quit).NotTo(BeNil())
-			Expect(quit()).To(Equal(tea.QuitMsg{}), "confirming quits the Session")
-		})
-	})
 })

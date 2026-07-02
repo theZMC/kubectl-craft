@@ -12,14 +12,15 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/yaml"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 	"github.com/thezmc/kubectl-craft/internal/tui"
 )
 
 // noShell is the sessionShell for specs that never reach a launch.
-func noShell(context.Context, []data.Kind, data.Fetcher, []data.GroupVersion, *tui.DeepLink) error {
-	return nil
+func noShell(context.Context, []data.Kind, data.Fetcher, []data.GroupVersion, *tui.DeepLink) (tui.Result, error) {
+	return tui.Result{}, nil
 }
 
 // launch records everything one Session shell launch received: the
@@ -113,16 +114,17 @@ func craftableClusterMux() *http.ServeMux {
 }
 
 // executeSession runs the root command against the given kubeconfig with a
-// recording sessionShell, mirroring one Session launch — extra args ride
-// along as the command line's positional args. It returns whatever the
-// process wrote to the real stdout during execution, everything the shell
-// was launched with, and the execution error.
-func executeSession(kubeconfig string, args ...string) (string, []launch, error) {
+// recording sessionShell that ends every Session on the given Result,
+// mirroring one Session launch — extra args ride along as the command
+// line's positional args. It returns whatever the process wrote to the
+// real stdout during execution, everything the shell was launched with,
+// and the execution error.
+func executeSession(kubeconfig string, result tui.Result, args ...string) (string, []launch, error) {
 	GinkgoHelper()
 	var launches []launch
-	shell := func(_ context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion, link *tui.DeepLink) error {
+	shell := func(_ context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion, link *tui.DeepLink) (tui.Result, error) {
 		launches = append(launches, launch{kinds: kinds, fetcher: fetcher, index: index, link: link})
-		return nil
+		return result, nil
 	}
 	cmd := newRootCommand(shell)
 	cmd.SetErr(io.Discard)
@@ -149,7 +151,7 @@ var _ = Describe("the root command", func() {
 			server := httptest.NewServer(craftableClusterMux())
 			DeferCleanup(server.Close)
 
-			out, launches, err := executeSession(writeKubeconfig(server.URL))
+			out, launches, err := executeSession(writeKubeconfig(server.URL), tui.Result{})
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(launches).To(HaveLen(1),
@@ -184,6 +186,58 @@ var _ = Describe("the root command", func() {
 		})
 	})
 
+	// The `kubectl craft > x.yaml` end-to-end proof rides the recorder
+	// shell rather than the k3s integration suite: tui.Run binds the alt
+	// screen to /dev/tty, and the containerized suite runs without a
+	// controlling terminal, so the real TUI cannot open there. The seam is
+	// exact — runSession sees only the shell's tui.Result either way — so
+	// these specs prove the whole command path around it: stdout carries
+	// the Emitted Manifest's bytes verbatim and nothing else, and discard
+	// ramps write nothing. (That tui.Run itself keeps rendering off stdout
+	// is pinned by its /dev/tty binding; PTY-driven teatest coverage of
+	// the alt screen is M5.)
+	When("the Session ends on an emit ramp", func() {
+		It("writes exactly the Emitted Manifest bytes to stdout after the shell returns", func() {
+			server := httptest.NewServer(craftableClusterMux())
+			DeferCleanup(server.Close)
+			manifest := []byte("apiVersion: apps/v1\nkind: Deployment\nspec:\n  replicas: 3\n")
+
+			out, launches, err := executeSession(
+				writeKubeconfig(server.URL),
+				tui.Result{Emitted: true, Manifest: manifest},
+			)
+
+			Expect(err).NotTo(HaveOccurred(), "the emit ramp exits zero")
+			Expect(launches).To(HaveLen(1))
+			Expect(out).To(Equal(string(manifest)),
+				"stdout must carry exactly the Manifest bytes — no ANSI, no prompts, no banner")
+			Expect(out).NotTo(ContainSubstring("\x1b"),
+				"no terminal escape sequence may leak into the redirected Manifest")
+
+			var parsed struct {
+				APIVersion string `json:"apiVersion"`
+				Kind       string `json:"kind"`
+			}
+			Expect(yaml.Unmarshal([]byte(out), &parsed)).To(Succeed(),
+				"the captured stdout must be parseable YAML, verbatim — kubectl apply -f works on it")
+			Expect(parsed.APIVersion).To(Equal("apps/v1"))
+			Expect(parsed.Kind).To(Equal("Deployment"))
+		})
+	})
+
+	When("the Session ends on a discard ramp", func() {
+		It("writes nothing to stdout and still exits zero", func() {
+			server := httptest.NewServer(craftableClusterMux())
+			DeferCleanup(server.Close)
+
+			out, launches, err := executeSession(writeKubeconfig(server.URL), tui.Result{})
+
+			Expect(err).NotTo(HaveOccurred(), "every exit ramp exits zero — discards included")
+			Expect(launches).To(HaveLen(1))
+			Expect(out).To(BeEmpty(), "a discarded Draft leaves stdout untouched")
+		})
+	})
+
 	When("the positional deep-link arg names a Kind", func() {
 		It("documents the kubectl-explain syntax in the command's help surfaces", func() {
 			cmd := newRootCommand(noShell)
@@ -199,7 +253,7 @@ var _ = Describe("the root command", func() {
 			server := httptest.NewServer(craftableClusterMux())
 			DeferCleanup(server.Close)
 
-			out, launches, err := executeSession(writeKubeconfig(server.URL), "deploy")
+			out, launches, err := executeSession(writeKubeconfig(server.URL), tui.Result{}, "deploy")
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(launches).To(HaveLen(1))
@@ -217,7 +271,7 @@ var _ = Describe("the root command", func() {
 			server := httptest.NewServer(craftableClusterMux())
 			DeferCleanup(server.Close)
 
-			_, launches, err := executeSession(writeKubeconfig(server.URL), "deploy.spec.strategy")
+			_, launches, err := executeSession(writeKubeconfig(server.URL), tui.Result{}, "deploy.spec.strategy")
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(launches).To(HaveLen(1))
@@ -231,7 +285,7 @@ var _ = Describe("the root command", func() {
 			server := httptest.NewServer(craftableClusterMux())
 			DeferCleanup(server.Close)
 
-			out, launches, err := executeSession(writeKubeconfig(server.URL), "gizmo.spec")
+			out, launches, err := executeSession(writeKubeconfig(server.URL), tui.Result{}, "gizmo.spec")
 
 			Expect(err).To(MatchError(ContainSubstring(`unknown kind "gizmo"`)),
 				"the pre-flight failure must name the token that failed to resolve")
@@ -244,7 +298,7 @@ var _ = Describe("the root command", func() {
 			server := httptest.NewServer(craftableClusterMux())
 			DeferCleanup(server.Close)
 
-			_, launches, err := executeSession(writeKubeconfig(server.URL), "deploy", "pod")
+			_, launches, err := executeSession(writeKubeconfig(server.URL), tui.Result{}, "deploy", "pod")
 
 			Expect(err).To(HaveOccurred())
 			Expect(launches).To(BeEmpty())
@@ -262,7 +316,7 @@ var _ = Describe("the root command", func() {
 			server := httptest.NewServer(mux)
 			DeferCleanup(server.Close)
 
-			out, launches, err := executeSession(writeKubeconfig(server.URL))
+			out, launches, err := executeSession(writeKubeconfig(server.URL), tui.Result{})
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("Kinds"),
@@ -278,7 +332,7 @@ var _ = Describe("the root command", func() {
 			server := httptest.NewServer(http.NotFoundHandler())
 			DeferCleanup(server.Close)
 
-			out, launches, err := executeSession(writeKubeconfig(server.URL))
+			out, launches, err := executeSession(writeKubeconfig(server.URL), tui.Result{})
 
 			Expect(err).To(MatchError(data.ErrOpenAPIV3NotServed))
 			Expect(launches).To(BeEmpty(),
@@ -293,7 +347,7 @@ var _ = Describe("the root command", func() {
 			unreachable := server.URL
 			server.Close()
 
-			out, launches, err := executeSession(writeKubeconfig(unreachable))
+			out, launches, err := executeSession(writeKubeconfig(unreachable), tui.Result{})
 
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(ContainSubstring("unable to connect to the server"))

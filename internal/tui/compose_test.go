@@ -631,6 +631,8 @@ var _ = Describe("the compose view", func() {
 
 			Expect(view).To(ContainSubstring("? help"))
 			Expect(view).To(ContainSubstring("q quit"))
+			Expect(view).To(ContainSubstring("ctrl+d emit"),
+				"the hint bar documents the direct emit-&-quit shortcut")
 			Expect(view).To(ContainSubstring("esc Kind picker"),
 				"the hint bar documents the key returning to the picker")
 		})

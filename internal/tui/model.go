@@ -56,6 +56,15 @@ type documentFetchFailedMsg struct {
 // Compose lifecycle).
 type returnToPickerMsg struct{}
 
+// manifestEmittedMsg ends the Session on the emit ramp: it carries the
+// Emitted Manifest's bytes out of the compose view — Ctrl-d's direct
+// emit-&-quit or the exit menu's Emit & quit — for the shell to record
+// before quitting. Stdout stays untouched until the alt screen closes
+// (DESIGN.md — Output): the TUI never writes the Manifest itself.
+type manifestEmittedMsg struct {
+	manifest []byte
+}
+
 // sessionView names the view the Session shell has open.
 type sessionView int
 
@@ -112,6 +121,13 @@ type Model struct {
 	// document fetches asynchronously, so the Field Path jump applies when
 	// the document lands and the compose view opens — never at launch.
 	pendingFieldPath string
+
+	// emitted and manifest record the Session's emit decision: set once,
+	// only when the Session ends on an emit ramp — Ctrl-d or the exit
+	// menu's Emit & quit — carrying the Emitted Manifest's bytes out to
+	// the caller. Every discard ramp leaves them zero.
+	emitted  bool
+	manifest []byte
 
 	// width and height are the terminal size from the last
 	// tea.WindowSizeMsg, replayed onto views as they open.
@@ -179,6 +195,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.documentFetchFailed(msg)
 	case returnToPickerMsg:
 		return m.returnToPicker(), nil
+	case manifestEmittedMsg:
+		// The emit ramp: record the decision and the bytes, then quit —
+		// the caller writes the Manifest to stdout after the alt screen
+		// closes (DESIGN.md — Output).
+		m.emitted, m.manifest = true, msg.manifest
+		return m, tea.Quit
 	case editorFinishedMsg:
 		if m.view == composing {
 			m.compose = m.compose.editorFinished(msg)
@@ -537,9 +559,34 @@ func (m Model) ConfirmingUnset() bool {
 }
 
 // ConfirmingDiscard reports whether the compose view is asking to confirm
-// that Esc-to-picker or `q`-to-quit may discard the non-empty Draft.
+// that Esc-to-picker may discard the non-empty Draft.
 func (m Model) ConfirmingDiscard() bool {
-	return m.view == composing && m.compose.discard != discardNone
+	return m.view == composing && m.compose.discardToPicker
+}
+
+// ExitMenuOpen reports whether `q`'s three-way exit menu is open over the
+// compose view's non-empty Draft.
+func (m Model) ExitMenuOpen() bool {
+	return m.view == composing && m.compose.exit != nil
+}
+
+// HighlightedExitOption returns the exit menu ramp the highlight sits on,
+// and false when the menu is not open.
+func (m Model) HighlightedExitOption() (string, bool) {
+	if !m.ExitMenuOpen() {
+		return "", false
+	}
+	return exitOptions[m.compose.exit.cursor].name, true
+}
+
+// EmittedManifest returns the Manifest bytes the Session recorded on an
+// emit ramp, and false when the Session has not emitted — every discard
+// ramp, and any Session still running.
+func (m Model) EmittedManifest() ([]byte, bool) {
+	if !m.emitted {
+		return nil, false
+	}
+	return m.manifest, true
 }
 
 // DraftValueAt returns the normalized data the Draft holds at a Draft-level
