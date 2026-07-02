@@ -50,9 +50,10 @@ type documentFetchFailedMsg struct {
 	err  error
 }
 
-// returnToPickerMsg reopens the Kind picker from the compose view. M2
-// composes no Draft, so returning needs no discard confirmation (DESIGN.md
-// — Compose lifecycle: the mid-compose warning arrives with the Draft).
+// returnToPickerMsg reopens the Kind picker from the compose view. The
+// compose view sends it only once returning is safe: silently on an empty
+// Draft, and after the discard confirm on a non-empty one (DESIGN.md —
+// Compose lifecycle).
 type returnToPickerMsg struct{}
 
 // sessionView names the view the Session shell has open.
@@ -64,7 +65,7 @@ const (
 	// fetchingDocument is the loading state between a picker selection
 	// and the compose view: the Kind's group document is fetching lazily.
 	fetchingDocument
-	// composing is the read-only compose view over the selected Kind.
+	// composing is the compose view over the selected Kind.
 	composing
 	// composeFailed is the in-TUI error state for a fetch or parse that
 	// failed mid-Session.
@@ -271,8 +272,9 @@ func (m Model) openCompose(document *schema.Document) Model {
 }
 
 // returnToPicker reopens the Kind picker, dropping the selection state —
-// an unapplied deep-link landing included; a still-in-flight fetch
-// resolves into the document memo and nothing more.
+// the compose view's Draft and an unapplied deep-link landing included
+// (the compose view has already confirmed a non-empty Draft's discard); a
+// still-in-flight fetch resolves into the document memo and nothing more.
 func (m Model) returnToPicker() Model {
 	m.view = pickingKind
 	m.kind = data.Kind{}
@@ -483,10 +485,37 @@ func (m Model) Notice() (string, bool) {
 }
 
 // MissingRequiredFieldPaths returns the required-but-unset Field Paths the
-// compose view flags: the empty-Draft required chain, sorted.
+// compose view flags: the Draft's contextual requiredness over what it has
+// instantiated, sorted.
 func (m Model) MissingRequiredFieldPaths() []string {
 	if m.view != composing {
 		return nil
 	}
 	return slices.Sorted(maps.Keys(m.compose.missing))
+}
+
+// Editing reports whether the compose view is in edit mode — a leaf's value
+// widget is open.
+func (m Model) Editing() bool {
+	return m.view == composing && m.compose.editor != nil
+}
+
+// ConfirmingDiscard reports whether the compose view is asking to confirm
+// that Esc-to-picker or `q`-to-quit may discard the non-empty Draft.
+func (m Model) ConfirmingDiscard() bool {
+	return m.view == composing && m.compose.discard != discardNone
+}
+
+// DraftValueAt returns the normalized data the Draft holds at a Draft-level
+// Field Path, and false when nothing is filled there — or when the compose
+// view is not open.
+func (m Model) DraftValueAt(fieldPath string) (any, bool) {
+	if m.view != composing {
+		return nil, false
+	}
+	value, filled := m.compose.draft.ValueAt(fieldPath)
+	if !filled {
+		return nil, false
+	}
+	return value.Data, true
 }

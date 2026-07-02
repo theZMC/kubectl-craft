@@ -457,14 +457,16 @@ var _ = Describe("the compose view", func() {
 			Expect(model.VisibleFieldPaths()).NotTo(ContainElement("spec.template"))
 		})
 
-		It("does nothing on a leaf — its value-entry widget lands in M3", func() {
+		It("opens a leaf's value widget in edit mode instead of expanding", func() {
 			model := focusField(composeDeployment(), "apiVersion")
 
 			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
 
 			Expect(cmd).To(BeNil())
+			Expect(model.Editing()).To(BeTrue(),
+				"Enter on a leaf opens the value widget — parents keep toggling expansion")
 			Expect(model.FocusedFieldPath()).To(Equal("apiVersion"))
-			Expect(model.VisibleFieldPaths()).To(HaveLen(6))
+			Expect(model.VisibleFieldPaths()).To(HaveLen(6), "a leaf has nothing to expand")
 		})
 	})
 
