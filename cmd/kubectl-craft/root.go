@@ -18,16 +18,22 @@ import (
 // list from discovery, the Fetcher sourcing OpenAPI v3 group documents
 // (the disk cache over the live client in production — ADR-0002), the
 // live /openapi/v3 index whose content hashes address every lazy fetch,
-// and the launch arg's resolved deep link when one was given (nil opens
-// the Kind picker). It returns the Session's Result — the emit decision
-// and the Emitted Manifest's bytes — once the alt screen has closed.
-// Production wiring passes tui.Run; command specs inject a recorder so
-// they can observe the launch without a controlling terminal.
+// the Validator behind the manual Validate keybinding (the live client —
+// dry-run answers are never cached), the Session's default namespace (the
+// --namespace flag / kubeconfig context default, resolved once at launch
+// the way kubectl resolves it), and the launch arg's resolved deep link
+// when one was given (nil opens the Kind picker). It returns the Session's
+// Result — the emit decision and the Emitted Manifest's bytes — once the
+// alt screen has closed. Production wiring passes tui.Run; command specs
+// inject a recorder so they can observe the launch without a controlling
+// terminal.
 type sessionShell func(
 	ctx context.Context,
 	kinds []data.Kind,
 	fetcher data.Fetcher,
 	index []data.GroupVersion,
+	validator data.Validator,
+	defaultNamespace string,
 	link *tui.DeepLink,
 ) (tui.Result, error)
 
@@ -91,8 +97,10 @@ func deepLinkArg(args []string) string {
 // runSession connects to the cluster the Session's resolved context points
 // to, wraps the live client in the hash-validated disk cache (ADR-0002),
 // fetches the live OpenAPI v3 index, discovers the browsable Kind list,
-// resolves the deep-link arg against it when one was given, and only then
-// launches the Session shell. An unreachable cluster, a cluster that
+// resolves the Session's default namespace the way kubectl does, resolves
+// the deep-link arg against the Kind list when one was given, and only then
+// launches the Session shell. The live client doubles as the shell's
+// Validator: dry-run answers are live by nature and never cached. An unreachable cluster, a cluster that
 // doesn't serve OpenAPI v3, a failed discovery, or an unresolvable
 // deep-link kind token hard-fails here — before the alt screen ever opens
 // — surfacing on stderr as a non-zero exit (DESIGN.md — Data layer). Group
@@ -138,6 +146,16 @@ func runSession(
 		return fmt.Errorf("listing the Session's browsable Kinds: %w", err)
 	}
 
+	// The Session's default namespace resolves once, at launch, the way
+	// kubectl resolves it: genericclioptions folds --namespace and the
+	// kubeconfig context default into one answer. Validate falls back to
+	// it whenever the Draft sets no metadata.namespace
+	// (data.ResolveNamespace).
+	defaultNamespace, _, err := configFlags.ToRawKubeConfigLoader().Namespace()
+	if err != nil {
+		return fmt.Errorf("resolving the Session's default namespace: %w", err)
+	}
+
 	var link *tui.DeepLink
 	if arg != "" {
 		if link, err = resolveDeepLink(kinds, arg); err != nil {
@@ -145,7 +163,7 @@ func runSession(
 		}
 	}
 
-	result, err := shell(ctx, kinds, fetcher, index, link)
+	result, err := shell(ctx, kinds, fetcher, index, client, defaultNamespace, link)
 	if err != nil {
 		return err
 	}

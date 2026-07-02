@@ -22,7 +22,10 @@ var _ = Describe("the kubectl-craft binary", func() {
 	It("reports the build-time version via --version without starting a Session", func() {
 		out := &bytes.Buffer{}
 		launched := false
-		cmd := newRootCommand(func(context.Context, []data.Kind, data.Fetcher, []data.GroupVersion, *tui.DeepLink) (tui.Result, error) {
+		cmd := newRootCommand(func(
+			context.Context, []data.Kind, data.Fetcher, []data.GroupVersion,
+			data.Validator, string, *tui.DeepLink,
+		) (tui.Result, error) {
 			launched = true
 			return tui.Result{}, nil
 		})

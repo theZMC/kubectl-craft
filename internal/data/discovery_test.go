@@ -44,21 +44,24 @@ func discoveryFixture() *stubKindLister {
 			{
 				GroupVersion: "craft.example.com/v2",
 				APIResources: []metav1.APIResource{
+					// Cluster-scoped on purpose: the scope must propagate
+					// both ways, so Validate can tell which Kinds POST
+					// under a namespace segment.
 					{Name: "widgets", Kind: "Widget", ShortNames: []string{"wgt"}, Verbs: metav1.Verbs{"create", "delete", "get", "list", "watch"}},
 				},
 			},
 			{
 				GroupVersion: "v1",
 				APIResources: []metav1.APIResource{
-					{Name: "configmaps", Kind: "ConfigMap", ShortNames: []string{"cm"}, Verbs: metav1.Verbs{"create", "delete", "get", "list", "watch"}},
+					{Name: "configmaps", Namespaced: true, Kind: "ConfigMap", ShortNames: []string{"cm"}, Verbs: metav1.Verbs{"create", "delete", "get", "list", "watch"}},
 					{Name: "componentstatuses", Kind: "ComponentStatus", ShortNames: []string{"cs"}, Verbs: metav1.Verbs{"get", "list"}},
-					{Name: "bindings", Kind: "Binding", Verbs: metav1.Verbs{"create"}},
+					{Name: "bindings", Namespaced: true, Kind: "Binding", Verbs: metav1.Verbs{"create"}},
 				},
 			},
 			{
 				GroupVersion: "apps/v1",
 				APIResources: []metav1.APIResource{
-					{Name: "deployments", Kind: "Deployment", ShortNames: []string{"deploy"}, Verbs: metav1.Verbs{"create", "delete", "get", "list", "patch", "update", "watch"}},
+					{Name: "deployments", Namespaced: true, Kind: "Deployment", ShortNames: []string{"deploy"}, Verbs: metav1.Verbs{"create", "delete", "get", "list", "patch", "update", "watch"}},
 					{Name: "deployments/status", Kind: "Deployment", Verbs: metav1.Verbs{"get", "patch", "update"}},
 					// Contrived: a subresource serving both create and list
 					// must still be excluded — by name shape, not verbs.
@@ -98,6 +101,7 @@ var _ = Describe("discovering the cluster's browsable Kinds", func() {
 					GroupVersionPath: "api/v1",
 					Plural:           "configmaps",
 					ShortNames:       []string{"cm"},
+					Namespaced:       true,
 					Preferred:        true,
 				},
 				{
@@ -105,6 +109,7 @@ var _ = Describe("discovering the cluster's browsable Kinds", func() {
 					GroupVersionPath: "apis/apps/v1",
 					Plural:           "deployments",
 					ShortNames:       []string{"deploy"},
+					Namespaced:       true,
 					Preferred:        true,
 				},
 				{
@@ -134,6 +139,18 @@ var _ = Describe("discovering the cluster's browsable Kinds", func() {
 				"a core Kind's Document path must use the api/<version> shape")
 			Expect(paths).To(HaveKeyWithValue("Deployment/v1", "apis/apps/v1"),
 				"a named group Kind's Document path must use the apis/<group>/<version> shape")
+		})
+
+		It("propagates each resource's namespace scope, so Validate knows which Kinds POST under a namespace segment", func() {
+			scopes := make(map[string]bool, len(kinds))
+			for _, kind := range kinds {
+				scopes[kind.GVK.Kind] = kind.Namespaced
+			}
+
+			Expect(scopes).To(HaveKeyWithValue("ConfigMap", true),
+				"a namespaced resource must surface as a namespaced Kind")
+			Expect(scopes).To(HaveKeyWithValue("Widget", false),
+				"a cluster-scoped resource must surface as a cluster-scoped Kind")
 		})
 
 		It("marks the group's Preferred Version and only that version", func() {

@@ -69,6 +69,20 @@ var _ = Describe("Kind discovery against a live k3s cluster", func() {
 			"the deep-link arg must be able to resolve the deploy short name")
 		Expect(deployment.Preferred).To(BeTrue(),
 			"apps/v1 must carry the group's Preferred Version marking")
+		Expect(deployment.Namespaced).To(BeTrue(),
+			"Deployment must surface as namespaced, so Validate POSTs it under a namespace segment")
+
+		namespaceGVK := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "Namespace"}
+		Expect(byGVK).To(HaveKey(namespaceGVK))
+		Expect(byGVK[namespaceGVK].Namespaced).To(BeFalse(),
+			"Namespace must surface as cluster-scoped, so Validate POSTs it without a namespace segment")
+
+		crdGVK := schema.GroupVersionKind{
+			Group: "apiextensions.k8s.io", Version: "v1", Kind: "CustomResourceDefinition",
+		}
+		Expect(byGVK).To(HaveKey(crdGVK))
+		Expect(byGVK[crdGVK].Namespaced).To(BeFalse(),
+			"CustomResourceDefinition must surface as cluster-scoped")
 
 		configMapGVK := schema.GroupVersionKind{Group: "", Version: "v1", Kind: "ConfigMap"}
 		Expect(byGVK).To(HaveKey(configMapGVK),

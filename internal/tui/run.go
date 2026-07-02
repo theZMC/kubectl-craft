@@ -44,7 +44,20 @@ type Result struct {
 // Without a controlling terminal (for example, a non-interactive CI job),
 // opening /dev/tty fails and Run returns before any program starts; the
 // caller surfaces that on stderr as a non-zero exit.
-func Run(ctx context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion, link *DeepLink) (Result, error) {
+//
+// The Validator and the Session's default namespace arrive through the
+// same seam the Fetcher does — resolved by the command before the alt
+// screen opens. The shell does not consume them yet: the manual Validate
+// keybinding wires them into the Model in the Validate-surfaces issue.
+func Run(
+	ctx context.Context,
+	kinds []data.Kind,
+	fetcher data.Fetcher,
+	index []data.GroupVersion,
+	_ data.Validator,
+	_ string,
+	link *DeepLink,
+) (Result, error) {
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return Result{}, fmt.Errorf(

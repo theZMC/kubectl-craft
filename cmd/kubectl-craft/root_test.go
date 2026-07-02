@@ -19,24 +19,43 @@ import (
 )
 
 // noShell is the sessionShell for specs that never reach a launch.
-func noShell(context.Context, []data.Kind, data.Fetcher, []data.GroupVersion, *tui.DeepLink) (tui.Result, error) {
+func noShell(
+	context.Context, []data.Kind, data.Fetcher, []data.GroupVersion,
+	data.Validator, string, *tui.DeepLink,
+) (tui.Result, error) {
 	return tui.Result{}, nil
 }
 
 // launch records everything one Session shell launch received: the
 // discovered Kind list, the Fetcher sourcing group documents, the live
-// /openapi/v3 index, and the resolved deep link (nil for a bare launch).
+// /openapi/v3 index, the Validator behind the manual Validate keybinding,
+// the Session's resolved default namespace, and the resolved deep link
+// (nil for a bare launch).
 type launch struct {
-	kinds   []data.Kind
-	fetcher data.Fetcher
-	index   []data.GroupVersion
-	link    *tui.DeepLink
+	kinds            []data.Kind
+	fetcher          data.Fetcher
+	index            []data.GroupVersion
+	validator        data.Validator
+	defaultNamespace string
+	link             *tui.DeepLink
 }
 
 // writeKubeconfig writes a kubeconfig whose fixed context points at the
 // given server, the way a Session binds to one cluster at invocation.
 func writeKubeconfig(server string) string {
 	GinkgoHelper()
+	return writeContextKubeconfig(server, "")
+}
+
+// writeContextKubeconfig is writeKubeconfig with a namespace pinned on the
+// fixed context, for specs about the kubectl-like default-namespace
+// resolution.
+func writeContextKubeconfig(server, namespace string) string {
+	GinkgoHelper()
+	namespaceLine := ""
+	if namespace != "" {
+		namespaceLine = fmt.Sprintf("    namespace: %s\n", namespace)
+	}
 	contents := fmt.Sprintf(`apiVersion: v1
 kind: Config
 clusters:
@@ -47,12 +66,12 @@ contexts:
 - context:
     cluster: fake
     user: fake
-  name: fake
+%s  name: fake
 current-context: fake
 users:
 - name: fake
   user: {}
-`, server)
+`, server, namespaceLine)
 	path := filepath.Join(GinkgoT().TempDir(), "kubeconfig")
 	Expect(os.WriteFile(path, []byte(contents), 0o600)).To(Succeed())
 	return path
@@ -122,8 +141,14 @@ func craftableClusterMux() *http.ServeMux {
 func executeSession(kubeconfig string, result tui.Result, args ...string) (string, []launch, error) {
 	GinkgoHelper()
 	var launches []launch
-	shell := func(_ context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion, link *tui.DeepLink) (tui.Result, error) {
-		launches = append(launches, launch{kinds: kinds, fetcher: fetcher, index: index, link: link})
+	shell := func(
+		_ context.Context, kinds []data.Kind, fetcher data.Fetcher, index []data.GroupVersion,
+		validator data.Validator, defaultNamespace string, link *tui.DeepLink,
+	) (tui.Result, error) {
+		launches = append(launches, launch{
+			kinds: kinds, fetcher: fetcher, index: index,
+			validator: validator, defaultNamespace: defaultNamespace, link: link,
+		})
 		return result, nil
 	}
 	cmd := newRootCommand(shell)
@@ -162,6 +187,7 @@ var _ = Describe("the root command", func() {
 					GroupVersionPath: "api/v1",
 					Plural:           "configmaps",
 					ShortNames:       []string{"cm"},
+					Namespaced:       true,
 					Preferred:        true,
 				},
 				data.Kind{
@@ -169,20 +195,58 @@ var _ = Describe("the root command", func() {
 					GroupVersionPath: "apis/apps/v1",
 					Plural:           "deployments",
 					ShortNames:       []string{"deploy"},
+					Namespaced:       true,
 					Preferred:        true,
 				},
-			), "the shell receives every create-capable Kind with its GVK, Document path, plural, short names, and Preferred marking")
+			), "the shell receives every create-capable Kind with its GVK, Document path, plural, short names, namespace scope, and Preferred marking")
 			Expect(launches[0].link).To(BeNil(),
 				"a bare launch carries no deep link — the shell opens on the Kind picker")
 			Expect(launches[0].fetcher).To(BeAssignableToTypeOf(&data.Cache{}),
 				"production wiring hands the shell the hash-validated disk cache over the live client (ADR-0002), "+
 					"so lazy group-document fetches warm and reuse it transparently")
+			Expect(launches[0].validator).To(BeAssignableToTypeOf(&data.Client{}),
+				"production wiring hands the shell the live client as its Validator — dry-run answers are live "+
+					"by nature and never cached")
+			Expect(launches[0].defaultNamespace).To(Equal("default"),
+				"with no --namespace flag and no context namespace, the Session's default namespace resolves "+
+					"to \"default\", like kubectl")
 			Expect(launches[0].index).To(ConsistOf(
 				data.GroupVersion{Path: "api/v1", ContentHash: "CORE1HASH"},
 				data.GroupVersion{Path: "apis/apps/v1", ContentHash: "APPS1HASH"},
 			), "the shell receives the live index so every lazy fetch is addressed by its server content hash")
 			Expect(out).To(BeEmpty(),
 				"the command path must write nothing to the process stdout — it is reserved for the Emitted Manifest")
+		})
+	})
+
+	When("the Session's default namespace is resolved, like kubectl", func() {
+		It("honors the --namespace flag over everything", func() {
+			server := httptest.NewServer(craftableClusterMux())
+			DeferCleanup(server.Close)
+
+			_, launches, err := executeSession(
+				writeContextKubeconfig(server.URL, "context-namespace"),
+				tui.Result{}, "--namespace", "flag-namespace",
+			)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(launches).To(HaveLen(1))
+			Expect(launches[0].defaultNamespace).To(Equal("flag-namespace"),
+				"--namespace must win over the kubeconfig context's namespace, like kubectl")
+		})
+
+		It("falls back to the kubeconfig context's namespace when no flag is given", func() {
+			server := httptest.NewServer(craftableClusterMux())
+			DeferCleanup(server.Close)
+
+			_, launches, err := executeSession(
+				writeContextKubeconfig(server.URL, "context-namespace"), tui.Result{},
+			)
+
+			Expect(err).NotTo(HaveOccurred())
+			Expect(launches).To(HaveLen(1))
+			Expect(launches[0].defaultNamespace).To(Equal("context-namespace"),
+				"the kubeconfig context's namespace is the Session default when no flag overrides it")
 		})
 	})
 

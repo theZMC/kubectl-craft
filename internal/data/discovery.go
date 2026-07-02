@@ -35,6 +35,14 @@ type Kind struct {
 	// them.
 	ShortNames []string
 
+	// Namespaced reports whether the resource lives inside a namespace,
+	// exactly as discovery serves it. Validate's endpoint construction
+	// hinges on it: a namespaced Kind POSTs under a namespace segment,
+	// a cluster-scoped Kind never does. Discovery is the source on
+	// purpose — it states scope directly per resource, where the OpenAPI
+	// v3 Documents only imply it through their path shapes.
+	Namespaced bool
+
 	// Preferred marks whether this version is its group's Preferred
 	// Version — the version the browser lands on when the Kind is served
 	// at multiple versions (CONTEXT.md).
@@ -67,9 +75,9 @@ func NewKindLister(cfg *rest.Config) (KindLister, error) {
 }
 
 // DiscoverKinds returns the cluster's browsable Kind list: every
-// create-capable Kind with its GVK, group-version path, short names, and
-// Preferred Version marking, in deterministic (group, version, kind) order
-// so the picker renders stably across calls.
+// create-capable Kind with its GVK, group-version path, short names,
+// namespace scope, and Preferred Version marking, in deterministic
+// (group, version, kind) order so the picker renders stably across calls.
 //
 // Results are fetched live on every call and never cached (DESIGN.md — Data
 // layer): aggregated discovery makes the list one round-trip, and caching it
@@ -147,6 +155,7 @@ func browsableKind(listGV schema.GroupVersion, resource metav1.APIResource, pref
 		GroupVersionPath: groupVersionPath(gvk.GroupVersion()),
 		Plural:           resource.Name,
 		ShortNames:       slices.Clone(resource.ShortNames),
+		Namespaced:       resource.Namespaced,
 		Preferred:        preferred[gvk.Group] == gvk.Version,
 	}
 }
