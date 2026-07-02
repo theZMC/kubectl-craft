@@ -1,9 +1,12 @@
 # Sample CRD for the fixture corpus (DESIGN.md — Testing): a Kind served at
 # two versions, feeding M3's version carry-over specs. spec.size keeps the
 # same Field Path in both versions (carries over); v1's spec.paint is renamed
-# to spec.color in v2 (dropped on switch, lands in the drop report). Installed
-# into the capture cluster by `mise run fixtures:capture` and captured as the
-# apis/craft.example.com/v1 and apis/craft.example.com/v2 group documents.
+# to spec.color in v2 (dropped on switch, lands in the drop report). Both
+# versions require spec at the root, so the Widget exercises the root-level
+# required chain of contextual requiredness (spec and spec.size are missing
+# on an empty Draft). Installed into the capture cluster by
+# `mise run fixtures:capture` and captured as the apis/craft.example.com/v1
+# and apis/craft.example.com/v2 group documents.
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
@@ -26,6 +29,8 @@ spec:
       openAPIV3Schema:
         type: object
         description: Widget (v1) — the older served version of the multi-version sample Kind.
+        required:
+        - spec
         properties:
           spec:
             type: object
@@ -46,6 +51,8 @@ spec:
       openAPIV3Schema:
         type: object
         description: Widget (v2) — the Preferred Version of the multi-version sample Kind.
+        required:
+        - spec
         properties:
           spec:
             type: object
