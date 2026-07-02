@@ -17,9 +17,10 @@ func widgetDraft() *schema.Draft {
 		`"properties":{"spec":{"type":"object","properties":{"size":{"type":"integer"}}}}}}}}`
 	doc, err := schema.ParseDocument([]byte(raw))
 	Expect(err).NotTo(HaveOccurred())
-	root, err := doc.FieldTree(schema.GroupVersionKind{Group: "craft.example.com", Version: "v1", Kind: "Widget"})
+	kind := schema.GroupVersionKind{Group: "craft.example.com", Version: "v1", Kind: "Widget"}
+	root, err := doc.FieldTree(kind)
 	Expect(err).NotTo(HaveOccurred())
-	return schema.NewDraft(root)
+	return schema.NewDraft(root, kind)
 }
 
 var _ = Describe("the HaveValueAt matcher", func() {

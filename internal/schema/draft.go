@@ -14,15 +14,18 @@ import (
 // Kind's field tree, but nothing here touches a cluster or a terminal.
 // Drafts are ephemeral by design; nothing persists across processes.
 type Draft struct {
+	kind    GroupVersionKind
 	root    *Node
 	entries *draftEntry
 }
 
-// NewDraft binds an empty Draft to a Kind's field tree — the root Node grown
-// by Document.FieldTree. Every Draft-level Field Path is resolved and checked
-// against that tree.
-func NewDraft(root *Node) *Draft {
-	return &Draft{root: root, entries: &draftEntry{}}
+// NewDraft binds an empty Draft to one Kind at one version (CONTEXT.md): its
+// field tree — the root Node grown by Document.FieldTree, against which every
+// Draft-level Field Path is resolved and checked — and its identity, the Kind
+// whose group, version, and kind Emit spells as the Manifest's apiVersion and
+// kind.
+func NewDraft(root *Node, kind GroupVersionKind) *Draft {
+	return &Draft{kind: kind, root: root, entries: &draftEntry{}}
 }
 
 // Set fills one scalar value at a Draft-level Field Path, instantiating every

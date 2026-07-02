@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: web
+    app.kubernetes.io/version: "80"
+  name: web
+spec:
+  paused: false
+  replicas: 0
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    spec:
+      containers:
+        - image: nginx:1.29
+          name: app
+          ports:
+            - containerPort: 8080
+              name: http
+        - image: envoy
+          name: sidecar
+          workingDir: ""

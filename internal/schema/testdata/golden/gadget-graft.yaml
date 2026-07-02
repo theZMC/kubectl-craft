@@ -1,0 +1,17 @@
+apiVersion: craft.example.com/v1
+kind: Gadget
+spec:
+  efficiency: 0.85
+  gears:
+    - low
+    - high
+  maxReplicas: 3
+  minReplicas: 1
+  tuning:
+    adaptive: true
+    knobs:
+      gain: 3
+      mode: turbo
+    thresholds:
+      - 0.5
+      - warm

@@ -13,7 +13,7 @@ import (
 // newDraft binds an empty Draft to a fixture Kind's field tree.
 func newDraft(fixture string, kind schema.GroupVersionKind) *schema.Draft {
 	GinkgoHelper()
-	return schema.NewDraft(growFieldTree(fixture, kind))
+	return schema.NewDraft(growFieldTree(fixture, kind), kind)
 }
 
 // deploymentDraft is the apps/v1 Deployment Draft most specs compose against.

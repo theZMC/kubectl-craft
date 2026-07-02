@@ -36,6 +36,10 @@ repos:
   hooks:
   - id: yamlfmt
     files: \.ya?ml$
+    # Golden Manifests pin Emit's exact bytes (byte-identity is the
+    # determinism contract, and gopkg.in/yaml.v3 cannot spell indentless
+    # arrays); regenerate with KUBECTL_CRAFT_UPDATE_GOLDEN=1 instead.
+    exclude: ^internal/schema/testdata/golden/.*\.yaml$
     args:
     - -formatter
     - indentless_arrays=true,retain_line_breaks=true,scan_folded_as_literal=true

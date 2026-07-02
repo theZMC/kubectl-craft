@@ -27,10 +27,16 @@ type GroupVersionKind struct {
 // String renders the Kind in glossary form, e.g. "apps/v1 Deployment"; the
 // core group renders bare, e.g. "v1 Pod".
 func (gvk GroupVersionKind) String() string {
+	return gvk.APIVersion() + " " + gvk.Kind
+}
+
+// APIVersion renders the Kind's group and version exactly as a Manifest's
+// apiVersion field spells them: "apps/v1", with the core group bare, "v1".
+func (gvk GroupVersionKind) APIVersion() string {
 	if gvk.Group == "" {
-		return gvk.Version + " " + gvk.Kind
+		return gvk.Version
 	}
-	return gvk.Group + "/" + gvk.Version + " " + gvk.Kind
+	return gvk.Group + "/" + gvk.Version
 }
 
 // Document is one parsed OpenAPI v3 group document — the authoritative
