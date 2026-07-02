@@ -4,7 +4,12 @@
 // Bubble Tea presentation layer (internal/tui).
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+
+	"k8s.io/cli-runtime/pkg/genericiooptions"
+)
 
 // version is injected at build time by goreleaser via ldflags
 // (-X main.version=...); "dev" identifies a locally built binary.
@@ -20,5 +25,9 @@ func placeholder() string {
 }
 
 func main() {
-	fmt.Println(placeholder())
+	streams := genericiooptions.IOStreams{In: os.Stdin, Out: os.Stdout, ErrOut: os.Stderr}
+	if err := newRootCommand(streams).Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
 }

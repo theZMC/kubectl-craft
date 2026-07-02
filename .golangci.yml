@@ -1,5 +1,13 @@
 version: "2"
 
+run:
+  # pin_dependencies keeps the repo-root package (dependencies.go) buildable
+  # and therefore linted everywhere golangci-lint runs — CI and the local
+  # pre-commit hook alike; without it the root dir has no buildable files
+  # and per-dir runs hard-fail on a typechecking error.
+  build-tags:
+  - pin_dependencies
+
 linters:
   default: standard
   enable:
@@ -14,6 +22,7 @@ linters:
   - misspell
   - nilnil
   - nolintlint
+  - revive
   - staticcheck
   - unconvert
   - unused
@@ -32,6 +41,11 @@ linters:
     govet:
       enable:
       - shadow
+    revive:
+      rules:
+      # Enforce Go initialism casing (URL, HTTP, API, ID, …) in every
+      # identifier we declare — Url/Http/Api spellings never land.
+      - name: var-naming
     staticcheck:
       # Ginkgo/gomega BDD suites use dot imports by convention
       # (DESIGN.md — Testing: ginkgo/gomega everywhere).

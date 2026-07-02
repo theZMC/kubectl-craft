@@ -11,7 +11,6 @@ import (
 	_ "github.com/charmbracelet/bubbles/textinput"
 	_ "github.com/charmbracelet/bubbletea"
 	_ "github.com/charmbracelet/lipgloss"
-	_ "k8s.io/cli-runtime/pkg/genericclioptions"
 	_ "k8s.io/client-go/discovery"
 	_ "k8s.io/kube-openapi/pkg/spec3"
 )
