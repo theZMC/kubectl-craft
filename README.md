@@ -56,8 +56,23 @@ to the finding, fix it, revalidate to a clean pass, `ctrl+d` Emit.
 it, and put the `kubectl-craft` binary anywhere on your `PATH`. That is all a
 kubectl plugin installation needs — kubectl discovers plugins by the
 `kubectl-<name>` binary naming convention, so `kubectl craft` works as soon as
-`kubectl-craft` is on `PATH`. (`kubectl krew install craft` is coming as a
-fast-follow once v0.1 is stable.)
+`kubectl-craft` is on `PATH`.
+
+**Krew** (pending krew-index submission): once the
+[staged submission](krew/SUBMISSION.md) is accepted into
+[krew-index](https://github.com/kubernetes-sigs/krew-index), installing is:
+
+```sh
+kubectl krew install craft
+```
+
+Until then, the same verified manifest installs directly from this repo — note
+that krew treats this as a development-mode install: it prints a warning and the
+plugin won't receive `kubectl krew upgrade` updates.
+
+```sh
+kubectl krew install --manifest-url=https://raw.githubusercontent.com/theZMC/kubectl-craft/main/krew/craft.yaml
+```
 
 **From source**:
 

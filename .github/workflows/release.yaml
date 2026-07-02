@@ -75,3 +75,15 @@ jobs:
       run: goreleaser release --clean
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # goreleaser's krews section (skip_upload: true) regenerates the krew
+    # manifest with this tag's version and sha256s into dist/krew/craft.yaml
+    # but never pushes it anywhere — krew-index only takes updates through
+    # its own PR flow. Attach it to the release so the manifest can be
+    # copied into krew/craft.yaml and the krew-index PR without rebuilding;
+    # krew/SUBMISSION.md documents that flow. --clobber keeps a re-run of
+    # this job after a partial success from failing on the already-attached
+    # asset.
+    - name: Attach the regenerated krew manifest to the release
+      run: gh release upload --clobber "$GITHUB_REF_NAME" dist/krew/craft.yaml
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

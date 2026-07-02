@@ -1,0 +1,51 @@
+apiVersion: krew.googlecontainertools.github.com/v1alpha2
+kind: Plugin
+metadata:
+  name: craft
+spec:
+  version: v0.1.0
+  platforms:
+  - bin: kubectl-craft
+    uri: https://github.com/theZMC/kubectl-craft/releases/download/v0.1.0/kubectl-craft_0.1.0_linux_arm64.tar.gz
+    sha256: 67c85926dad5be5b18c0c19ab86a2bf70eb7448fb1ee6f6f6b7a980a961e2d3f
+    selector:
+      matchLabels:
+        os: linux
+        arch: arm64
+  - bin: kubectl-craft
+    uri: https://github.com/theZMC/kubectl-craft/releases/download/v0.1.0/kubectl-craft_0.1.0_linux_amd64.tar.gz
+    sha256: 147da24990461472cd66ab1174900380ae9314dfd44040ae38d553aea1304a81
+    selector:
+      matchLabels:
+        os: linux
+        arch: amd64
+  - bin: kubectl-craft
+    uri: https://github.com/theZMC/kubectl-craft/releases/download/v0.1.0/kubectl-craft_0.1.0_darwin_arm64.tar.gz
+    sha256: b7621f7fa66a0721e8ad9764f89c41e0b4142f59f0c778c518615e477c8f8880
+    selector:
+      matchLabels:
+        os: darwin
+        arch: arm64
+  - bin: kubectl-craft
+    uri: https://github.com/theZMC/kubectl-craft/releases/download/v0.1.0/kubectl-craft_0.1.0_darwin_amd64.tar.gz
+    sha256: 41c446e941bb470dae3e498966a5953d3f15ed2a9e3e94c46d6701be6be24434
+    selector:
+      matchLabels:
+        os: darwin
+        arch: amd64
+  shortDescription: Compose Manifests from live Type Schemas
+  homepage: https://github.com/theZMC/kubectl-craft
+  caveats: |
+    Composing needs a reachable cluster: every Type Schema is fetched live
+    from the /openapi/v3 endpoint of the current kubeconfig context, which
+    requires Kubernetes 1.24 or newer.
+  description: |
+    kubectl craft opens a TUI for composing Kubernetes Manifests from the
+    Type Schemas defined on the cluster your current context points to:
+    navigate a Kind's field tree with per-field documentation alongside,
+    fill values with type-appropriate widgets, Validate against the live
+    API server (server-side dry-run — nothing persists), and emit the
+    finished Manifest to stdout. The TUI renders to the terminal while
+    stdout carries nothing but the Emitted Manifest, so
+    `kubectl craft > deployment.yaml` just works. The tool never mutates
+    the cluster.

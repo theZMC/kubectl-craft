@@ -1,7 +1,7 @@
 # Release configuration for the kubectl-craft plugin binary (ADR-0005).
 # Snapshot builds run in CI on build-relevant PRs; tag pushes publish to
-# GitHub Releases. Krew manifest/submission, signing, and brew taps are
-# deliberately out of scope for M0.
+# GitHub Releases plus a regenerated krew manifest (krews below). Signing
+# and brew taps are deliberately out of scope.
 version: 2
 
 project_name: kubectl-craft
@@ -36,6 +36,34 @@ archives:
 
 checksum:
   name_template: checksums.txt
+
+# Regenerates the krew plugin manifest with fresh version/sha256 values on
+# every tag release. skip_upload keeps goreleaser from pushing anywhere:
+# krew-index only accepts manifest updates through its own PR flow, so the
+# manifest lands in dist/krew/craft.yaml and the release workflow attaches
+# it to the GitHub Release. From there the maintainer copies it over
+# krew/craft.yaml (the staged submission copy) and into the krew-index PR —
+# see krew/SUBMISSION.md. Keep the prose here in lockstep with
+# krew/craft.yaml: this section is what writes that file's next version.
+krews:
+- name: craft
+  homepage: https://github.com/theZMC/kubectl-craft
+  short_description: Compose Manifests from live Type Schemas
+  description: |
+    kubectl craft opens a TUI for composing Kubernetes Manifests from the
+    Type Schemas defined on the cluster your current context points to:
+    navigate a Kind's field tree with per-field documentation alongside,
+    fill values with type-appropriate widgets, Validate against the live
+    API server (server-side dry-run — nothing persists), and emit the
+    finished Manifest to stdout. The TUI renders to the terminal while
+    stdout carries nothing but the Emitted Manifest, so
+    `kubectl craft > deployment.yaml` just works. The tool never mutates
+    the cluster.
+  caveats: |
+    Composing needs a reachable cluster: every Type Schema is fetched live
+    from the /openapi/v3 endpoint of the current kubeconfig context, which
+    requires Kubernetes 1.24 or newer.
+  skip_upload: true
 
 snapshot:
   version_template: '{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}'
