@@ -393,6 +393,41 @@ func (m Model) HelpOpen() bool {
 	return m.view == composing && m.compose.helpOpen
 }
 
+// SearchOpen reports whether the compose view's `/` field-search overlay
+// is open.
+func (m Model) SearchOpen() bool {
+	return m.view == composing && m.compose.searchOpen
+}
+
+// SearchFilter returns the search overlay's active type-to-filter query —
+// empty when the overlay is not open.
+func (m Model) SearchFilter() string {
+	if !m.SearchOpen() {
+		return ""
+	}
+	return m.compose.search.filter
+}
+
+// SearchMatches returns the search overlay's ranked matches for the active
+// filter: every candidate in tree order when the filter is empty, tighter
+// and shorter matches first otherwise, each carrying the rune indices the
+// filter matched.
+func (m Model) SearchMatches() []SearchMatch {
+	if !m.SearchOpen() {
+		return nil
+	}
+	return m.compose.search.matches()
+}
+
+// HighlightedSearchMatch returns the match the search overlay's selection
+// sits on, and false when the overlay is not open or nothing matches.
+func (m Model) HighlightedSearchMatch() (SearchMatch, bool) {
+	if !m.SearchOpen() {
+		return SearchMatch{}, false
+	}
+	return m.compose.search.highlighted()
+}
+
 // MissingRequiredFieldPaths returns the required-but-unset Field Paths the
 // compose view flags: the empty-Draft required chain, sorted.
 func (m Model) MissingRequiredFieldPaths() []string {

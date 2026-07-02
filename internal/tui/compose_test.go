@@ -33,6 +33,17 @@ const phantomDocument = `{"openapi":"3.0.0","info":{"title":"Kubernetes","versio
 	`"properties":{"spec":{"type":"object","properties":{` +
 	`"ghost":{"$ref":"#/components/schemas/com.example.craft.v4.Missing"}}}}}}}}`
 
+// rackDocument is a synthetic group document pinning a map-shaped object
+// whose values carry schema-defined fields — the map-crossing shape the
+// search landing rule needs (the captured corpus's maps hold scalar values
+// only).
+const rackDocument = `{"openapi":"3.0.0","info":{"title":"Kubernetes","version":"1.36"},` +
+	`"components":{"schemas":{"com.example.craft.v5.Rack":{"type":"object",` +
+	`"x-kubernetes-group-version-kind":[{"group":"craft.example.com","kind":"Rack","version":"v5"}],` +
+	`"properties":{"spec":{"type":"object","properties":{` +
+	`"slots":{"type":"object","additionalProperties":{"type":"object","properties":{` +
+	`"label":{"type":"string"}}}}}}}}}}}`
+
 // fetchRecord is one FetchGroupDocument call a stub Fetcher served: the
 // (group-version path, content hash) pair addressing it.
 type fetchRecord struct {
@@ -85,6 +96,7 @@ func corpusFetcher() *stubFetcher {
 		"apis/craft.example.com/v1":    fixtureBytes("apis_craft.example.com_v1.json"),
 		"apis/craft.example.com/v3":    []byte(paletteDocument),
 		"apis/craft.example.com/v4":    []byte(phantomDocument),
+		"apis/craft.example.com/v5":    []byte(rackDocument),
 		"apis/apiextensions.k8s.io/v1": fixtureBytes("apis_apiextensions.k8s.io_v1.json"),
 	}}
 }
@@ -97,6 +109,7 @@ func corpusIndex() []data.GroupVersion {
 		{Path: "apis/craft.example.com/v1", ContentHash: "CRAFT1HASH"},
 		{Path: "apis/craft.example.com/v3", ContentHash: "CRAFT3HASH"},
 		{Path: "apis/craft.example.com/v4", ContentHash: "CRAFT4HASH"},
+		{Path: "apis/craft.example.com/v5", ContentHash: "CRAFT5HASH"},
 		{Path: "apis/apiextensions.k8s.io/v1", ContentHash: "EXT1HASH"},
 	}
 }

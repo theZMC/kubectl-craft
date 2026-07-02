@@ -28,7 +28,7 @@ const (
 	// (DESIGN.md — Keybindings: k9s-style, the handful of keys for the
 	// focused view; `?` opens the full map).
 	composeHints = "j/k move · h/l collapse/expand · enter toggle · " +
-		"g/G top/bottom · esc Kind picker · ? help · q quit"
+		"g/G top/bottom · / search · esc Kind picker · ? help · q quit"
 
 	// transitHints is the hint bar for the loading and error states
 	// between the picker and the compose view.
@@ -49,6 +49,7 @@ const helpText = `Compose view — navigate mode
   h, ←       collapse the focused field; on a collapsed field: jump to its parent
   enter      toggle expansion on a parent (value entry lands in M3)
   g / G      jump to the top / bottom of the tree
+  /          search the Kind's Field Paths and jump to a match
   ?          open this help
 
   esc        return to the Kind picker (M2 composes no Draft, nothing to discard)
@@ -122,6 +123,12 @@ type compose struct {
 	// helpOpen renders the `?` full-map help overlay in place of the
 	// panes; any key dismisses it.
 	helpOpen bool
+
+	// searchOpen renders the `/` field-search overlay in place of the
+	// panes; search carries its state, candidates enumerated on the
+	// overlay's first open.
+	searchOpen bool
+	search     fieldSearch
 }
 
 // newCompose grows the compose view for a Kind from its parsed group
@@ -272,6 +279,9 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 		c.helpOpen = false
 		return c, nil
 	}
+	if c.searchOpen {
+		return c.updateSearch(key), nil
+	}
 
 	switch key.String() {
 	case "q":
@@ -285,10 +295,56 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 	case "?":
 		c.helpOpen = true
 		return c, nil
+	case "/":
+		return c.openSearch(), nil
 	}
 
 	c.navigate(key.String())
 	return c, nil
+}
+
+// openSearch opens the `/` field-search overlay, enumerating the open
+// Kind's schema-level Field Paths on the first open — the candidate set is
+// the Kind's whole Type Schema, not the tree's expansion state.
+func (c compose) openSearch() compose {
+	if c.search.candidates == nil {
+		c.search.candidates = c.root.node.FieldPaths()
+	}
+	// M2's only scope; the DRAFT scope's Tab toggle switches this field
+	// when the Draft lands (DESIGN.md — Flow §5).
+	c.search.scope = scopeSchema
+	c.search.height = c.searchListHeight()
+	c.searchOpen = true
+	return c
+}
+
+// updateSearch routes one key press into the open search overlay and
+// applies its outcome: dismissal returns to navigate mode; selecting the
+// highlighted match closes the overlay, resets it for the next search, and
+// jumps the tree under the landing rule.
+func (c compose) updateSearch(key tea.KeyMsg) compose {
+	overlay, outcome := c.search.update(key)
+	c.search = overlay
+
+	switch outcome {
+	case searchDismissed:
+		c.searchOpen = false
+	case searchSelected:
+		match, _ := c.search.highlighted()
+		c.searchOpen = false
+		c.search = c.search.reset()
+		c.landOn(match.FieldPath)
+	}
+	return c
+}
+
+// searchListHeight is how many match rows fit under the search overlay's
+// prompt line; zero means unbounded (no tea.WindowSizeMsg yet).
+func (c compose) searchListHeight() int {
+	if c.bodyHeight() <= 0 {
+		return 0
+	}
+	return max(c.bodyHeight()-1, 1)
 }
 
 // navigate applies one tree-navigation key.
@@ -411,9 +467,12 @@ func (c *compose) follow() {
 	}
 }
 
-// resize records the terminal size and keeps the focused row visible.
+// resize records the terminal size and keeps the focused row — and the
+// search overlay's highlighted match — visible.
 func (c compose) resize(width, height int) compose {
 	c.width, c.height = width, height
+	c.search.height = c.searchListHeight()
+	c.search = c.search.follow()
 	c.follow()
 	return c
 }
@@ -457,14 +516,26 @@ func (c compose) breadcrumb() string {
 func (c compose) view() string {
 	return clipLine(c.breadcrumb(), c.width) + "\n" +
 		c.bodyView() + "\n" +
-		clipLine(dimmedStyle.Render(composeHints), c.width) + "\n"
+		clipLine(dimmedStyle.Render(c.hints()), c.width) + "\n"
 }
 
-// bodyView renders the pane area: the `?` help overlay when open, the tree
-// and detail panes otherwise.
+// hints is the contextual one-line hint bar: the search overlay's own hint
+// line while it is open, the navigate-mode hints otherwise.
+func (c compose) hints() string {
+	if c.searchOpen {
+		return searchHints
+	}
+	return composeHints
+}
+
+// bodyView renders the pane area: the `?` help overlay or the `/` search
+// overlay when one is open, the tree and detail panes otherwise.
 func (c compose) bodyView() string {
 	if c.helpOpen {
 		return limitLines(helpText, c.bodyHeight())
+	}
+	if c.searchOpen {
+		return limitLines(c.searchView(), c.bodyHeight())
 	}
 
 	treeWidth, detailWidth := c.paneWidths()
@@ -479,6 +550,16 @@ func (c compose) bodyView() string {
 		"  ",
 		c.detailPane(detailWidth, c.bodyHeight()),
 	)
+}
+
+// searchView renders the search overlay's lines, each clipped to the
+// terminal width.
+func (c compose) searchView() string {
+	lines := strings.Split(c.search.view(), "\n")
+	for index, line := range lines {
+		lines[index] = clipLine(line, c.width)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // treePane renders the visible window of tree rows.
