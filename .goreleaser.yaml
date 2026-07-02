@@ -12,10 +12,14 @@ builds:
   binary: kubectl-craft
   env:
   - CGO_ENABLED=0
+  # Windows is deliberately absent for v0.1: the TUI acquires its terminal via
+  # /dev/tty, which does not exist on Windows, so shipped windows archives
+  # could never run (#15). Re-add windows here (and a zip format_overrides
+  # entry under archives) once console acquisition (CONIN$/CONOUT$) lands with
+  # a real Windows test story.
   goos:
   - linux
   - darwin
-  - windows
   goarch:
   - amd64
   - arm64
@@ -29,10 +33,6 @@ archives:
     {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
   formats:
   - tar.gz
-  format_overrides:
-  - goos: windows
-    formats:
-    - zip
 
 checksum:
   name_template: checksums.txt

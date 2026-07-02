@@ -177,15 +177,15 @@ Linux and macOS (amd64 and arm64) are supported. Any cluster serving
 `/openapi/v3` (roughly Kubernetes 1.24+) works; the tool fails with a clear
 minimum-version error otherwise.
 
-<!-- TODO(#15): Windows posture is undecided — goreleaser is configured to
-build windows archives, but the TUI cannot yet acquire a console on Windows,
-so they would fail gracefully at launch. Update this section when issue #15
-lands (console support or dropped artifacts). -->
-
-Windows builds are configured but do not yet run: the TUI needs a controlling
-terminal (`/dev/tty`) and exits gracefully with an error on Windows.
-[Issue #15](https://github.com/theZMC/kubectl-craft/issues/15) tracks whether
-v0.1 ships Windows console support or drops the Windows archives.
+Windows artifacts are not shipped in v0.1: the TUI acquires its controlling
+terminal via `/dev/tty`, which does not exist on Windows, so a Windows binary
+could never run — it would exit gracefully with an actionable error, but always.
+Rather than publish archives that cannot work, releases skip Windows until
+console acquisition lands with a real test story
+([issue #15](https://github.com/theZMC/kubectl-craft/issues/15) records the
+decision). On any platform, running without a controlling terminal (for example
+under a plain pipe with no TTY) exits non-zero with a clear error and never
+panics.
 
 ## Development
 
