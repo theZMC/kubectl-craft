@@ -94,6 +94,7 @@ func corpusFetcher() *stubFetcher {
 	return &stubFetcher{documents: map[string][]byte{
 		"apis/apps/v1":                 fixtureBytes("apis_apps_v1.json"),
 		"apis/craft.example.com/v1":    fixtureBytes("apis_craft.example.com_v1.json"),
+		"apis/craft.example.com/v2":    fixtureBytes("apis_craft.example.com_v2.json"),
 		"apis/craft.example.com/v3":    []byte(paletteDocument),
 		"apis/craft.example.com/v4":    []byte(phantomDocument),
 		"apis/craft.example.com/v5":    []byte(rackDocument),
@@ -107,6 +108,7 @@ func corpusIndex() []data.GroupVersion {
 	return []data.GroupVersion{
 		{Path: "apis/apps/v1", ContentHash: "APPS1HASH"},
 		{Path: "apis/craft.example.com/v1", ContentHash: "CRAFT1HASH"},
+		{Path: "apis/craft.example.com/v2", ContentHash: "CRAFT2HASH"},
 		{Path: "apis/craft.example.com/v3", ContentHash: "CRAFT3HASH"},
 		{Path: "apis/craft.example.com/v4", ContentHash: "CRAFT4HASH"},
 		{Path: "apis/craft.example.com/v5", ContentHash: "CRAFT5HASH"},

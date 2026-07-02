@@ -31,7 +31,7 @@ const (
 	// the focused view; `?` opens the full map). The mutation verbs `a`
 	// and `d` prepend contextually — see navigateHints.
 	composeHints = "j/k move · h/l collapse/expand · enter edit/toggle · " +
-		"g/G top/bottom · / search · esc Kind picker · ? help · ctrl+d emit · q quit"
+		"g/G top/bottom · / search · V version · esc Kind picker · ? help · ctrl+d emit · q quit"
 
 	// keyPromptHints is the hint bar while `a`'s inline key prompt is
 	// open on a map-shaped node, in the modal grammar: Enter confirms,
@@ -59,9 +59,9 @@ const (
 )
 
 // helpText is the `?` full-map help overlay: every key the compose view
-// serves, and nothing it doesn't — Validate and version switching arrive in
-// later issues (DESIGN.md — Keybindings: fixed keys keep the hint
-// bar/help/docs trivially truthful).
+// serves, and nothing it doesn't — Validate arrives in a later issue
+// (DESIGN.md — Keybindings: fixed keys keep the hint bar/help/docs trivially
+// truthful).
 const helpText = `Compose view — navigate mode
 
   j/k, ↑/↓   move focus
@@ -73,6 +73,8 @@ const helpText = `Compose view — navigate mode
   e          pop a schema-blind subtree out to $EDITOR as raw YAML
   g / G      jump to the top / bottom of the tree
   /          search the Kind's Field Paths and jump to a match
+  V          switch the open Kind's version — values carry over by Field Path,
+             and a drop report confirms anything that would not survive
   ?          open this help
 
 Edit mode — Enter on a leaf opens its type-appropriate widget
@@ -228,6 +230,22 @@ type compose struct {
 	// Path doesn't exist in the Type Schema: it takes the hint bar's line
 	// until the first key press — the Kind stays browsable throughout.
 	notice string
+
+	// versions is the open Kind's served versions from the discovery data
+	// already on the shell — the picker rows sharing this (group, kind),
+	// the Preferred Version leading. `V`'s version list is grown from it.
+	versions []data.Kind
+
+	// versionList is `V`'s open served-version list — a type-to-filter
+	// surface over the Kind's other served versions; nil when closed.
+	versionList *versionList
+
+	// pendingSwitch is the version switch awaiting the drop confirm: the
+	// carry-over already ran against the target version's field tree, and
+	// the confirm renders its drop report; nil otherwise. Enter accepts
+	// the drops and commits; Esc keeps composing at the current version
+	// untouched (DESIGN.md — Compose lifecycle).
+	pendingSwitch *pendingSwitch
 }
 
 // newCompose grows the compose view for a Kind from its parsed group
@@ -242,7 +260,13 @@ func newCompose(kind data.Kind, document *schema.Document) (compose, error) {
 	if err != nil {
 		return compose{}, fmt.Errorf("opening the compose view for %s: %w", kindDisplayName(kind), err)
 	}
-	draft := schema.NewDraft(root, gvk)
+	return composeOverDraft(kind, root, schema.NewDraft(root, gvk))
+}
+
+// composeOverDraft grows the compose view over an existing Draft — the empty
+// Draft of a Kind's first open, or the carried Draft of a version switch,
+// whose instantiated items and keys the tree rows reflect as they expand.
+func composeOverDraft(kind data.Kind, root *schema.Node, draft *schema.Draft) (compose, error) {
 	missing, err := draft.MissingRequired()
 	if err != nil {
 		return compose{}, fmt.Errorf("flagging %s's required-but-unset fields: %w", kindDisplayName(kind), err)
@@ -478,8 +502,9 @@ func appendVisibleRows(rows []*treeRow, row *treeRow) []*treeRow {
 
 // update applies one key press under the modal grammar (DESIGN.md —
 // Keybindings): the help overlay consumes every key first, then the open
-// value widget, the exit menu, the discard confirm, and the search overlay;
-// what remains is navigate mode's command map.
+// value widget, the confirms and menus — only one body overlay is ever open
+// at a time, because each opens from navigate mode — and the search
+// surfaces; what remains is navigate mode's command map.
 func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 	if key.String() == "ctrl+c" {
 		// The conventional escape hatch quits immediately from anywhere —
@@ -505,6 +530,12 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 	if c.unset != nil {
 		return c.updateUnsetConfirm(key), nil
 	}
+	if c.pendingSwitch != nil {
+		return c.updateSwitchConfirm(key)
+	}
+	if c.versionList != nil {
+		return c.updateVersionList(key)
+	}
 	if c.exit != nil {
 		return c.updateExitMenu(key)
 	}
@@ -523,29 +554,14 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
 	switch key.String() {
 	case "q":
-		// The single exit verb (DESIGN.md — Exit ramp): a non-empty Draft
-		// opens the three-way exit menu — emitting, discarding, and
-		// cancelling all stay one keypress away; an empty Draft quits as
-		// immediately as Ctrl-c.
-		if len(c.draft.Instantiated()) == 0 {
-			return c, tea.Quit
-		}
-		c.exit = &exitMenu{}
-		return c, nil
+		return c.pressQuit()
 	case "ctrl+d":
 		// The EOF idiom: a direct emit-&-quit, no menu (DESIGN.md — Exit
 		// ramp). An empty Draft emits the identity-only Manifest — the
 		// sparse-emission contract's floor.
 		return c.emitAndQuit()
 	case "esc":
-		// The documented way back to the Kind picker. A non-empty Draft
-		// would be discarded by returning, so it warns first (DESIGN.md —
-		// Compose lifecycle); an empty Draft returns silently.
-		if len(c.draft.Instantiated()) == 0 {
-			return c, func() tea.Msg { return returnToPickerMsg{} }
-		}
-		c.discardToPicker = true
-		return c, nil
+		return c.pressEscape()
 	case "enter":
 		return c.pressEnter(), nil
 	case "a":
@@ -554,6 +570,11 @@ func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
 		return c.pressUnset(), nil
 	case "e":
 		return c.pressPopOut()
+	case "V":
+		// The version switch (DESIGN.md — Command map: `V` version
+		// switch): values carry over by Field Path, a drop report
+		// confirming anything that would not survive.
+		return c.openVersionList(), nil
 	case "?":
 		c.helpOpen = true
 		return c, nil
@@ -562,6 +583,29 @@ func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
 	}
 
 	c.navigate(key.String())
+	return c, nil
+}
+
+// pressQuit is `q`, the single exit verb (DESIGN.md — Exit ramp): a
+// non-empty Draft opens the three-way exit menu — emitting, discarding, and
+// cancelling all stay one keypress away; an empty Draft quits as immediately
+// as Ctrl-c.
+func (c compose) pressQuit() (compose, tea.Cmd) {
+	if len(c.draft.Instantiated()) == 0 {
+		return c, tea.Quit
+	}
+	c.exit = &exitMenu{}
+	return c, nil
+}
+
+// pressEscape is Esc, the documented way back to the Kind picker. A
+// non-empty Draft would be discarded by returning, so it warns first
+// (DESIGN.md — Compose lifecycle); an empty Draft returns silently.
+func (c compose) pressEscape() (compose, tea.Cmd) {
+	if len(c.draft.Instantiated()) == 0 {
+		return c, func() tea.Msg { return returnToPickerMsg{} }
+	}
+	c.discardToPicker = true
 	return c, nil
 }
 
@@ -1280,6 +1324,12 @@ func (c compose) resize(width, height int) compose {
 	c.width, c.height = width, height
 	c.search.height = c.searchListHeight()
 	c.search = c.search.follow()
+	if c.versionList != nil {
+		list := *c.versionList
+		list.height = c.searchListHeight()
+		list = list.follow()
+		c.versionList = &list
+	}
 	c.follow()
 	return c
 }
@@ -1358,6 +1408,9 @@ func (c compose) footer() string {
 	if c.unset != nil {
 		return highlightedStyle.Render(c.unset.prompt())
 	}
+	if c.pendingSwitch != nil {
+		return highlightedStyle.Render(c.pendingSwitch.prompt())
+	}
 	if c.discardToPicker {
 		return highlightedStyle.Render(discardToPickerPrompt)
 	}
@@ -1380,6 +1433,9 @@ func (c compose) hints() string {
 	}
 	if c.exit != nil {
 		return exitMenuHints
+	}
+	if c.versionList != nil {
+		return versionListHints
 	}
 	if c.searchOpen {
 		return searchHints
@@ -1431,6 +1487,12 @@ func (c compose) bodyView() string {
 	if c.exit != nil {
 		return limitLines(c.exit.view(), c.bodyHeight())
 	}
+	if c.pendingSwitch != nil {
+		return limitLines(clipLines(c.pendingSwitch.view(), c.width), c.bodyHeight())
+	}
+	if c.versionList != nil {
+		return limitLines(clipLines(c.versionList.view(), c.width), c.bodyHeight())
+	}
 	if c.searchOpen {
 		return limitLines(c.searchView(), c.bodyHeight())
 	}
@@ -1452,9 +1514,15 @@ func (c compose) bodyView() string {
 // searchView renders the search overlay's lines, each clipped to the
 // terminal width.
 func (c compose) searchView() string {
-	lines := strings.Split(c.search.view(), "\n")
+	return clipLines(c.search.view(), c.width)
+}
+
+// clipLines clips every line of rendered text to the given width,
+// ANSI-safely; zero width leaves them unbounded.
+func clipLines(text string, width int) string {
+	lines := strings.Split(text, "\n")
 	for index, line := range lines {
-		lines[index] = clipLine(line, c.width)
+		lines[index] = clipLine(line, width)
 	}
 	return strings.Join(lines, "\n")
 }

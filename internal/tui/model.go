@@ -122,6 +122,12 @@ type Model struct {
 	// the document lands and the compose view opens — never at launch.
 	pendingFieldPath string
 
+	// switching is the target of an in-flight version switch while its
+	// group document fetches — the compose view (Draft included) stays
+	// intact underneath, so cancelling or failing returns to composing;
+	// nil when no switch is fetching.
+	switching *data.Kind
+
 	// emitted and manifest record the Session's emit decision: set once,
 	// only when the Session ends on an emit ramp — Ctrl-d or the exit
 	// menu's Emit & quit — carrying the Emitted Manifest's bytes out to
@@ -195,6 +201,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.documentFetchFailed(msg)
 	case returnToPickerMsg:
 		return m.returnToPicker(), nil
+	case versionSwitchRequestedMsg:
+		return m.startVersionSwitch(msg.kind)
+	case versionSwitchAcceptedMsg:
+		return m.acceptVersionSwitch(), nil
 	case manifestEmittedMsg:
 		// The emit ramp: record the decision and the bytes, then quit —
 		// the caller writes the Manifest to stdout after the alt screen
@@ -249,11 +259,22 @@ func (m Model) fetchDocumentCmd(kind data.Kind) tea.Cmd {
 }
 
 // documentFetched memoizes the parsed group document and opens the compose
-// view — unless the Session has already moved on (for example, Esc went
-// back to the picker while the fetch was in flight), in which case the
-// parse is kept for the group's next open and nothing else happens.
+// view — or, when a version switch awaited it, resolves the switch's
+// carry-over — unless the Session has already moved on (for example, Esc
+// went back to the picker or cancelled the switch while the fetch was in
+// flight), in which case the parse is kept for the group's next open and
+// nothing else happens.
 func (m Model) documentFetched(msg documentFetchedMsg) (tea.Model, tea.Cmd) {
 	m.documents[msg.kind.GroupVersionPath] = msg.document
+
+	if m.switching != nil {
+		if m.view != fetchingDocument || msg.kind.GVK != m.switching.GVK {
+			return m, nil
+		}
+		target := *m.switching
+		m.switching = nil
+		return m.resolveVersionSwitch(target, msg.document), nil
+	}
 
 	if m.view != fetchingDocument || msg.kind.GVK != m.kind.GVK {
 		return m, nil
@@ -263,8 +284,20 @@ func (m Model) documentFetched(msg documentFetchedMsg) (tea.Model, tea.Cmd) {
 
 // documentFetchFailed transitions to the in-TUI error state — never a
 // crash — when the awaited fetch or parse fails; a stale failure from a
-// Kind the Session already left is dropped.
+// Kind the Session already left is dropped. A version switch's failure
+// returns to composing with a non-fatal notice instead: the Draft is never
+// lost to a fetch that didn't land.
 func (m Model) documentFetchFailed(msg documentFetchFailedMsg) (tea.Model, tea.Cmd) {
+	if m.switching != nil {
+		if m.view != fetchingDocument || msg.kind.GVK != m.switching.GVK {
+			return m, nil
+		}
+		m.switching = nil
+		m.view = composing
+		m.compose.notice = switchFailedNotice(msg.kind, msg.err)
+		return m, nil
+	}
+
 	if m.view != fetchingDocument || msg.kind.GVK != m.kind.GVK {
 		return m, nil
 	}
@@ -287,6 +320,7 @@ func (m Model) openCompose(document *schema.Document) Model {
 		return m
 	}
 
+	view.versions = m.kindVersions(m.kind)
 	if m.pendingFieldPath != "" {
 		view = view.landDeepLink(m.pendingFieldPath)
 		m.pendingFieldPath = ""
@@ -308,6 +342,7 @@ func (m Model) returnToPicker() Model {
 	m.fetchErr = nil
 	m.compose = compose{}
 	m.pendingFieldPath = ""
+	m.switching = nil
 	return m
 }
 
@@ -330,8 +365,12 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // transitKey is the loading and error states' key grammar: Esc returns to
 // the Kind picker (abandoning the selection), and the empty-Draft exit
 // rules apply — `q` and Ctrl-c quit immediately, no prompt (DESIGN.md —
-// Exit ramp).
+// Exit ramp). A version switch's loading state answers to switchTransitKey
+// instead: its Draft is still composing underneath.
 func (m Model) transitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.switching != nil {
+		return m.switchTransitKey(key)
+	}
 	switch key.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
@@ -348,7 +387,7 @@ func (m Model) View() string {
 	case pickingKind:
 		return m.picker.view()
 	case fetchingDocument:
-		return m.transitView("fetching the " + m.kind.GroupVersionPath +
+		return m.transitView("fetching the " + m.transitKind().GroupVersionPath +
 			" OpenAPI v3 Document — a group's Type Schemas load lazily on its first open")
 	case composeFailed:
 		return m.transitView("opening " + kindDisplayName(m.kind) + " failed: " + m.fetchErr.Error())
@@ -357,12 +396,26 @@ func (m Model) View() string {
 	}
 }
 
-// transitView renders the loading and error states: the selected Kind as
-// the breadcrumb, the state's message, and the contextual hint bar.
+// transitView renders the loading and error states: the awaited Kind as the
+// breadcrumb, the state's message, and the contextual hint bar — a version
+// switch's loading state hints at cancelling instead of quitting.
 func (m Model) transitView(body string) string {
-	return clipLine(kindDisplayName(m.kind), m.width) + "\n\n" +
+	hints := transitHints
+	if m.switching != nil {
+		hints = switchTransitHints
+	}
+	return clipLine(kindDisplayName(m.transitKind()), m.width) + "\n\n" +
 		clipLine(body, m.width) + "\n\n" +
-		clipLine(dimmedStyle.Render(transitHints), m.width) + "\n"
+		clipLine(dimmedStyle.Render(hints), m.width) + "\n"
+}
+
+// transitKind is the Kind a loading or error state is about: the version
+// switch's target while one fetches, the selected Kind otherwise.
+func (m Model) transitKind() data.Kind {
+	if m.switching != nil {
+		return *m.switching
+	}
+	return m.kind
 }
 
 // Filter returns the Kind picker's active type-to-filter query.
@@ -431,7 +484,7 @@ func (m Model) Breadcrumb() string {
 	case composing:
 		return m.compose.breadcrumb()
 	default:
-		return kindDisplayName(m.kind)
+		return kindDisplayName(m.transitKind())
 	}
 }
 
