@@ -1,6 +1,8 @@
 package tui_test
 
 import (
+	"errors"
+
 	tea "github.com/charmbracelet/bubbletea"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -269,6 +271,19 @@ var _ = Describe("the exit ramp", func() {
 			view := model.View()
 			Expect(view).To(ContainSubstring("Emit & quit / Discard & quit / Cancel"))
 			Expect(view).To(ContainSubstring("ctrl+d"))
+		})
+	})
+
+	When("the emission itself fails", func() {
+		// The fixture corpus cannot make a real Draft.Emit fail, so the
+		// notice's load-bearing wording pins through the export_test seam:
+		// what failed, the emission's own words, and that nothing was lost.
+		It("pins the non-fatal emit-failure notice's wording", func() {
+			notice := tui.EmitFailureNotice(errors.New("rendering the Manifest: boom"))
+
+			Expect(notice).To(Equal(
+				"emitting the Manifest failed: rendering the Manifest: boom — the Draft is intact",
+			))
 		})
 	})
 })

@@ -230,9 +230,15 @@ func (c compose) confirmGatePrompt() (compose, tea.Cmd) {
 // pressJumpToFinding is the jump-to-first-error key, `n` in navigate mode:
 // it focuses the first mapped finding's node — ancestors expanded, the
 // deep-link landing machinery's discipline — and subsequent presses cycle
-// through the findings in server order.
+// through the findings in server order. With nothing to jump to it says why
+// instead of staying silent, mirroring `r`'s explanatory notices.
 func (c compose) pressJumpToFinding() compose {
-	if c.validation == nil || len(c.validation.mapped) == 0 {
+	if c.validation == nil {
+		c.notice = "no Validate findings yet — v validates the Draft against the live cluster"
+		return c
+	}
+	if len(c.validation.mapped) == 0 {
+		c.notice = c.noFindingsNotice()
 		return c
 	}
 	state := *c.validation
@@ -250,13 +256,26 @@ func (c compose) pressJumpToFinding() compose {
 	return c
 }
 
+// noFindingsNotice says why the jump key has nothing to jump to when a
+// Validate outcome exists but mapped no finding onto the tree.
+func (c compose) noFindingsNotice() string {
+	switch {
+	case c.validation.clean:
+		return "the last Validate passed — no findings to jump to"
+	case c.validation.unavailable != "":
+		return "the last Validate did not run — r shows why"
+	default:
+		return "no findings mark the tree — r opens the Validate results pane"
+	}
+}
+
 // pressResults is `r` in navigate mode: it reopens the results pane over
 // the last Validate's unmappable findings, Status summary, or
 // unavailability — and says why when there is nothing to show.
 func (c compose) pressResults() compose {
 	switch {
 	case c.validation == nil:
-		c.notice = "no Validate results yet — v runs the server-side dry-run"
+		c.notice = "no Validate results yet — v validates the Draft against the live cluster"
 	case c.validation.clean:
 		c.notice = "the last Validate passed — the results pane has nothing to show"
 	default:
@@ -484,13 +503,13 @@ func (c compose) resultsView() string {
 		return strings.Join([]string{
 			highlightedStyle.Render("Validate unavailable: " + state.unavailable),
 			"",
-			dimmedStyle.Render("The cluster could not run the server-side dry-run — this says nothing " +
+			dimmedStyle.Render("The cluster could not run the Validate — this says nothing " +
 				"about the Manifest, and no tree node is marked."),
 		}, "\n")
 	}
 
 	lines := []string{
-		highlightedStyle.Render("Validate results — the server rejected the dry-run"),
+		highlightedStyle.Render("Validate results — the server rejected the Manifest"),
 		summaryLine(state.summary),
 	}
 	if state.stale {

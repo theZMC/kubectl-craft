@@ -73,7 +73,7 @@ const helpText = `Compose view — navigate mode
   e          pop a schema-blind subtree out to $EDITOR as raw YAML
   g / G      jump to the top / bottom of the tree
   /          search the Kind's Field Paths and jump to a match
-  v          Validate the Draft with a server-side dry-run — nothing persists;
+  v          Validate the Draft against the live cluster (server dry-run) — nothing persists;
              findings mark the offending tree nodes, and anything unmappable
              lands in the results pane. Editing the Draft marks findings stale
              (v revalidates); switching the version drops them entirely
@@ -728,7 +728,7 @@ type exitOption struct {
 // exitOptions are the exit menu's ramps in menu order (DESIGN.md — Exit
 // ramp): Emit & quit leads — the ramp composing exists for.
 var exitOptions = []exitOption{
-	{name: "Emit & quit", detail: "write the Manifest to stdout"},
+	{name: "Emit & quit", detail: "emit the Manifest to stdout"},
 	{name: "Discard & quit", detail: "quit with nothing emitted"},
 	{name: "Cancel", detail: "keep composing"},
 }
@@ -777,10 +777,19 @@ func (c compose) updateExitMenu(key tea.KeyMsg) (compose, tea.Cmd) {
 func (c compose) emitAndQuit() (compose, tea.Cmd) {
 	manifest, err := c.draft.Emit()
 	if err != nil {
-		c.notice = "emitting the Manifest failed: " + err.Error()
+		c.notice = emitFailureNotice(err)
 		return c, nil
 	}
 	return c, func() tea.Msg { return manifestEmittedMsg{manifest: manifest} }
+}
+
+// emitFailureNotice spells the exit ramp's non-fatal emission failure: what
+// failed, the emission's own words, and the reassurance that nothing was
+// lost — the Draft is never lost to a rendering error. The wording is pinned
+// by spec through the export_test seam, because the fixture corpus cannot
+// make a real Emit fail.
+func emitFailureNotice(err error) string {
+	return "emitting the Manifest failed: " + err.Error() + " — the Draft is intact"
 }
 
 // view renders the open exit menu as the body overlay: every ramp on its
@@ -838,10 +847,16 @@ func (u unsetConfirm) prompt() string {
 // pressAdd is `a` in navigate mode (DESIGN.md — Keybindings: mutation verbs):
 // on an array node it appends an item; on a map-shaped node it opens the
 // inline key prompt; anywhere else it is a no-op with a hint-bar flash — not
-// an error state.
+// an error state. A row whose children cannot load (a dangling $ref) says so
+// in the same words the detail pane uses: a silent failure is a missing
+// message.
 func (c compose) pressAdd() compose {
 	row := c.focused()
-	if row == nil || !c.loadRow(row) {
+	if row == nil {
+		return c
+	}
+	if !c.loadRow(row) {
+		c.notice = "expanding " + rowDisplayName(row) + " failed: " + row.expandErr.Error()
 		return c
 	}
 

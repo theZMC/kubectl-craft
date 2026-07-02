@@ -10,6 +10,14 @@ import (
 	"github.com/thezmc/kubectl-craft/internal/data"
 )
 
+// openTTY opens the controlling terminal the Session shell renders on and
+// reads from. It is a seam only so specs can pin the no-TTY failure — a
+// spec process has a controlling terminal, so the real open cannot be made
+// to fail hermetically.
+var openTTY = func() (*os.File, error) {
+	return os.OpenFile("/dev/tty", os.O_RDWR, 0)
+}
+
 // Result is what one Session leaves behind for the caller: the emit
 // decision, and — only on an emit ramp — the Emitted Manifest's bytes. The
 // caller writes them to stdout after the alt screen closes (DESIGN.md —
@@ -59,7 +67,7 @@ func Run(
 	defaultNamespace string,
 	link *DeepLink,
 ) (Result, error) {
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	tty, err := openTTY()
 	if err != nil {
 		return Result{}, fmt.Errorf(
 			"kubectl craft is interactive and needs a controlling terminal: %w", err,

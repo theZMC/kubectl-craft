@@ -511,6 +511,21 @@ var _ = Describe("the compose view", func() {
 			Expect(model.FocusedFieldPath()).To(Equal("spec.ghost"))
 			Expect(model.ComposeOpen()).To(BeTrue())
 		})
+
+		It("says why a cannot act on the broken row, instead of failing silently", func() {
+			phantom := composeKind("craft.example.com", "v4", "Phantom", "apis/craft.example.com/v4")
+			model := openKind(newShell(), phantom)
+			model = expandField(model, "spec")
+			model = focusField(model, "spec.ghost")
+
+			model, _ = press(model, keyRune('a'))
+
+			notice, showing := model.Notice()
+			Expect(showing).To(BeTrue(), "a silent failure is a missing message")
+			Expect(notice).To(HavePrefix("expanding spec.ghost failed:"),
+				"the notice names the row in the same words the detail pane uses")
+			Expect(notice).To(ContainSubstring("does not define"))
+		})
 	})
 
 	When("the detail pane renders the focused node's metadata", func() {

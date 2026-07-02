@@ -437,6 +437,68 @@ var _ = Describe("the manual Validate", func() {
 		})
 	})
 
+	When("the follow-up keys explain their no-ops", func() {
+		It("says n has nothing to jump to before any Validate, and after a clean pass", func() {
+			validator := &stubValidator{outcome: data.Clean{}}
+			model := composeValidatable(validatingShell(validator, "team-a"), kindNamed("Deployment", "v1"))
+
+			model, _ = press(model, keyRune('n'))
+			notice, showing := model.Notice()
+			Expect(showing).To(BeTrue(), "a silent no-op would leave n's grammar undiscoverable")
+			Expect(notice).To(Equal("no Validate findings yet — v validates the Draft against the live cluster"))
+
+			model = validateThrough(model)
+			model, _ = press(model, keyRune('n'))
+			notice, showing = model.Notice()
+			Expect(showing).To(BeTrue())
+			Expect(notice).To(Equal("the last Validate passed — no findings to jump to"))
+		})
+
+		It("points n at the results pane when no finding reached the tree", func() {
+			validator := &stubValidator{outcome: data.Invalid{Status: fixtureStatus("configmap_webhook_denial.json")}}
+			model := composeValidatable(validatingShell(validator, "team-a"), kindNamed("Deployment", "v1"))
+			model = validateThrough(model)
+			model, _ = press(model, escKey) // dismiss the auto-opened results pane
+
+			model, _ = press(model, keyRune('n'))
+
+			notice, showing := model.Notice()
+			Expect(showing).To(BeTrue())
+			Expect(notice).To(Equal("no findings mark the tree — r opens the Validate results pane"))
+		})
+
+		It("points n at the unavailability's why when the last Validate never ran", func() {
+			validator := &stubValidator{outcome: data.Unavailable{
+				Reason: "the cluster refused the dry-run (HTTP 403): forbidden",
+			}}
+			model := composeValidatable(validatingShell(validator, "team-a"), kindNamed("Deployment", "v1"))
+			model = validateThrough(model)
+			model, _ = press(model, escKey)
+
+			model, _ = press(model, keyRune('n'))
+
+			notice, _ := model.Notice()
+			Expect(notice).To(Equal("the last Validate did not run — r shows why"))
+		})
+
+		It("says why r has nothing to show before any Validate and after a clean pass", func() {
+			validator := &stubValidator{outcome: data.Clean{}}
+			model := composeValidatable(validatingShell(validator, "team-a"), kindNamed("Deployment", "v1"))
+
+			model, _ = press(model, keyRune('r'))
+			notice, showing := model.Notice()
+			Expect(showing).To(BeTrue())
+			Expect(notice).To(Equal("no Validate results yet — v validates the Draft against the live cluster"))
+			Expect(model.ResultsPaneOpen()).To(BeFalse())
+
+			model = validateThrough(model)
+			model, _ = press(model, keyRune('r'))
+			notice, _ = model.Notice()
+			Expect(notice).To(Equal("the last Validate passed — the results pane has nothing to show"))
+			Expect(model.ResultsPaneOpen()).To(BeFalse())
+		})
+	})
+
 	When("the results pane carries what the tree cannot", func() {
 		It("opens on a cause-less webhook denial with the Status summary and the denial's text", func() {
 			validator := &stubValidator{outcome: data.Invalid{Status: fixtureStatus("configmap_webhook_denial.json")}}
@@ -605,7 +667,8 @@ var _ = Describe("the manual Validate", func() {
 			model, _ := press(composeDeployment(), keyRune('?'))
 
 			Expect(model.HelpOpen()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("server-side dry-run"))
+			Expect(model.View()).To(ContainSubstring("(server dry-run)"),
+				"help carries the one allowed dry-run parenthetical — everywhere else speaks Validate")
 			Expect(model.View()).To(ContainSubstring("jump to the first Validate finding"))
 			Expect(model.View()).To(ContainSubstring("results pane"))
 			Expect(model.View()).To(ContainSubstring("marks findings stale"))

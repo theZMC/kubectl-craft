@@ -13,8 +13,9 @@ import (
 
 // versionListHints is the hint bar while `V`'s served-version list is open —
 // a dedicated search surface, so its keys follow the type-to-filter grammar
-// (DESIGN.md — Keybindings).
-const versionListHints = "type to filter · ↑/↓ move · enter switch · esc cancel"
+// (DESIGN.md — Keybindings). Esc clears an active filter before dismissing,
+// exactly like the `/` search overlay, so the hint spells the same order.
+const versionListHints = "type to filter · ↑/↓ move · enter switch · esc clear/dismiss"
 
 // switchTransitHints is the hint bar while a version switch's group document
 // fetches: cancelling returns to composing — the Draft is never lost to an
@@ -421,9 +422,12 @@ func (m Model) switchTransitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // switchFailedNotice spells a failed version switch for the compose view's
-// non-fatal notice: the Session keeps composing at the current version.
+// non-fatal notice: what failed, the fetch or parse's own words, and what
+// the Session is doing now — composing continues at the current version,
+// the Draft untouched.
 func switchFailedNotice(target data.Kind, err error) string {
-	return "switching to " + kindDisplayName(target) + " failed: " + err.Error()
+	return "switching to " + kindDisplayName(target) + " failed: " + err.Error() +
+		" — still composing at the current version"
 }
 
 // kindVersions lists one Kind's served versions from the discovery data

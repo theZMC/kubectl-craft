@@ -443,8 +443,8 @@ func (m Model) View() string {
 	case composeFailed:
 		return m.transitView("opening " + kindDisplayName(m.kind) + " failed: " + m.fetchErr.Error())
 	case validatingDraft:
-		return m.transitView("validating the Draft with a server-side dry-run — " +
-			"full schema, CRD-rule, and admission webhook validation, nothing persisted")
+		return m.transitView("validating the Draft against the live cluster — " +
+			"full schema, CRD-rule, and admission webhook checks, nothing persisted")
 	default:
 		return m.compose.view()
 	}
