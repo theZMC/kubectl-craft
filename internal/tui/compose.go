@@ -3,6 +3,8 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -24,11 +26,17 @@ const (
 	schemaBlindNote = "The Type Schema can't describe what goes here; " +
 		"the raw-YAML escape hatch composes it, and its editor isn't wired yet."
 
-	// composeHints is the compose view's one-line contextual hint bar
-	// (DESIGN.md — Keybindings: k9s-style, the handful of keys for the
-	// focused view; `?` opens the full map).
+	// composeHints is the compose view's one-line hint bar in navigate
+	// mode (DESIGN.md — Keybindings: k9s-style, the handful of keys for
+	// the focused view; `?` opens the full map). The mutation verbs `a`
+	// and `d` prepend contextually — see navigateHints.
 	composeHints = "j/k move · h/l collapse/expand · enter edit/toggle · " +
 		"g/G top/bottom · / search · esc Kind picker · ? help · q quit"
+
+	// keyPromptHints is the hint bar while `a`'s inline key prompt is
+	// open on a map-shaped node, in the modal grammar: Enter confirms,
+	// Esc cancels.
+	keyPromptHints = "type the new entry's key · enter confirm · esc cancel"
 
 	// discardToPickerPrompt is the confirm Esc opens over a non-empty
 	// Draft (DESIGN.md — Compose lifecycle: returning to the picker
@@ -52,15 +60,17 @@ const (
 )
 
 // helpText is the `?` full-map help overlay: every key the compose view
-// serves, and nothing it doesn't — Validate, version switching, mutation
-// verbs, and the exit ramp's prompt arrive in later issues (DESIGN.md —
-// Keybindings: fixed keys keep the hint bar/help/docs trivially truthful).
+// serves, and nothing it doesn't — Validate, version switching, and the
+// exit ramp's prompt arrive in later issues (DESIGN.md — Keybindings: fixed
+// keys keep the hint bar/help/docs trivially truthful).
 const helpText = `Compose view — navigate mode
 
   j/k, ↑/↓   move focus
   l, →       expand the focused field; on an expanded field: step to its first child
   h, ←       collapse the focused field; on a collapsed field: jump to its parent
   enter      open the value widget on a leaf; toggle expansion on a parent
+  a          append an item on an array node; prompt for a key on a map node
+  d          unset the focused value — a subtree with filled values confirms the discard count first
   g / G      jump to the top / bottom of the tree
   /          search the Kind's Field Paths and jump to a match
   ?          open this help
@@ -78,6 +88,27 @@ Edit mode — Enter on a leaf opens its type-appropriate widget
 
 Any key closes this help.`
 
+// rowKind names what a tree row stands for at the Draft layer: a
+// schema-defined field, an uninstantiated collection's structural
+// placeholder, or an instantiated array item or map key the Draft holds.
+type rowKind int
+
+const (
+	// rowField is a schema-defined field row (the root included): its
+	// Draft-level Field Path extends its parent's by one dotted segment.
+	rowField rowKind = iota
+	// rowPlaceholder is the schema-level "[items]"/"[value]" row kept for
+	// structure browsing: it shares its parent's Field Path and addresses
+	// nothing in the Draft — instantiating goes through `a`.
+	rowPlaceholder
+	// rowItem is one instantiated array item, addressed by its [n]
+	// selector at the Draft layer.
+	rowItem
+	// rowKey is one instantiated map entry, addressed by its quoted-key
+	// selector at the Draft layer.
+	rowKey
+)
+
 // treeRow is one visible position of the compose view's field tree: a
 // schema.Node plus the presentation state the tree pane needs. Rows are
 // materialized lazily as their parents expand, so a self-referential Type
@@ -86,10 +117,19 @@ type treeRow struct {
 	node *schema.Node
 
 	// label is the row's display name: the Field Path's last segment for
-	// a schema-defined field, "[items]" for an array's item Node, and
-	// "[value]" for a map's value Node (which share their parent's Field
-	// Path — dots address schema-defined fields, never items or keys).
+	// a schema-defined field, "[items]"/"[value]" for an uninstantiated
+	// collection's placeholder (which shares its parent's Field Path —
+	// dots address schema-defined fields, never items or keys), and the
+	// bracketed Draft-level spelling for an instantiated item or key
+	// (`containers[0]`, `labels["app"]`).
 	label string
+
+	// kind is what the row stands for at the Draft layer; index carries a
+	// rowItem's Draft-level position (renumbered when an earlier sibling
+	// is unset), and key carries a rowKey's map key.
+	kind  rowKind
+	index int
+	key   string
 
 	// depth indents the row: the root sits at zero.
 	depth int
@@ -157,6 +197,16 @@ type compose struct {
 	// (DESIGN.md — Keybindings: modal grammar).
 	editor *fieldEditor
 
+	// keyPrompt is `a`'s open inline key prompt on a map-shaped node; nil
+	// otherwise. Enter confirms the typed key into the Draft (a duplicate
+	// rejects inline), Esc cancels without touching the Draft.
+	keyPrompt *keyPrompt
+
+	// unset is `d`'s open destructive confirm over a subtree with filled
+	// descendants; nil otherwise. y/Enter discards, n/Esc keeps — no undo
+	// in MVP, so the confirm is the safety net (DESIGN.md — Keybindings).
+	unset *unsetConfirm
+
 	// discard is the open discard confirm over a non-empty Draft — Esc's
 	// return to the picker or `q`'s quit; discardNone otherwise. Enter
 	// discards, Esc keeps composing.
@@ -191,7 +241,7 @@ func newCompose(kind data.Kind, document *schema.Document) (compose, error) {
 		view.missing[fieldPath] = true
 	}
 
-	view.root = &treeRow{node: root, label: kind.GVK.Kind}
+	view.root = &treeRow{node: root, label: kind.GVK.Kind, kind: rowField}
 	if !view.loadRow(view.root) {
 		return compose{}, fmt.Errorf("expanding %s's root Type Schema: %w", kindDisplayName(kind), view.root.expandErr)
 	}
@@ -232,15 +282,26 @@ func (c *compose) loadRow(row *treeRow) bool {
 	shared := 0
 	row.children = make([]*treeRow, 0, len(children))
 	for _, child := range children {
-		childPath := child.FieldPath()
-		label := lastPathSegment(childPath)
-		if childPath == parentPath {
-			label = sharedChildLabel(parentType, shared)
-			shared++
+		if child.FieldPath() != parentPath {
+			row.children = append(row.children, &treeRow{
+				node:   child,
+				label:  lastPathSegment(child.FieldPath()),
+				depth:  row.depth + 1,
+				parent: row,
+			})
+			continue
 		}
+
+		// A shared child is a collection's structure: the rows for what
+		// the Draft has instantiated there first, the schema-level
+		// placeholder row after them, kept for structure browsing.
+		label := sharedChildLabel(parentType, shared)
+		shared++
+		row.children = append(row.children, c.instantiatedRows(row, child, label)...)
 		row.children = append(row.children, &treeRow{
 			node:   child,
 			label:  label,
+			kind:   rowPlaceholder,
 			depth:  row.depth + 1,
 			parent: row,
 		})
@@ -249,19 +310,104 @@ func (c *compose) loadRow(row *treeRow) bool {
 	return true
 }
 
-// extendsParent reports whether the row extends its parent's Field Path —
-// a schema-defined field row, as opposed to an array's item row or a map's
-// value row, which share their parent's Field Path. The root extends
-// nothing.
-func extendsParent(row *treeRow) bool {
-	return row.parent != nil && row.node.FieldPath() != row.parent.node.FieldPath()
+// instantiatedRows grows the rows for the items or keys the Draft holds at a
+// collection row — consulted from the Draft itself, so a reloaded subtree
+// always reflects the Draft's current state. A collection inside a
+// placeholder subtree has no Draft-level Field Path and so never carries
+// instantiated rows.
+func (c *compose) instantiatedRows(row *treeRow, child *schema.Node, label string) []*treeRow {
+	collectionPath, addressable := row.draftFieldPath()
+	if !addressable || collectionPath == "" {
+		return nil
+	}
+
+	var rows []*treeRow
+	if label == "[items]" {
+		for index := range c.draft.ItemCount(collectionPath) {
+			rows = append(rows, newItemRow(row, child, index))
+		}
+		return rows
+	}
+	for _, key := range c.draft.Keys(collectionPath) {
+		rows = append(rows, newKeyRow(row, child, key))
+	}
+	return rows
+}
+
+// newItemRow is one instantiated array item's row: the item Node under its
+// Draft-level [n] selector.
+func newItemRow(parent *treeRow, item *schema.Node, index int) *treeRow {
+	return &treeRow{
+		node:   item,
+		label:  itemRowLabel(parent, index),
+		kind:   rowItem,
+		index:  index,
+		depth:  parent.depth + 1,
+		parent: parent,
+	}
+}
+
+// newKeyRow is one instantiated map entry's row: the value Node under its
+// Draft-level quoted-key selector.
+func newKeyRow(parent *treeRow, value *schema.Node, key string) *treeRow {
+	return &treeRow{
+		node:   value,
+		label:  keyRowLabel(parent, key),
+		kind:   rowKey,
+		key:    key,
+		depth:  parent.depth + 1,
+		parent: parent,
+	}
+}
+
+// itemRowLabel spells an item row's display name in the Draft-level bracket
+// grammar, e.g. "containers[0]".
+func itemRowLabel(parent *treeRow, index int) string {
+	return fmt.Sprintf("%s[%d]", parent.label, index)
+}
+
+// keyRowLabel spells a key row's display name in the Draft-level bracket
+// grammar, e.g. `labels["app"]`.
+func keyRowLabel(parent *treeRow, key string) string {
+	return parent.label + "[" + strconv.Quote(key) + "]"
+}
+
+// draftFieldPath spells the row's Draft-level Field Path — dotted fields,
+// [n] item selectors, quoted key selectors — and whether it has one at all:
+// a placeholder row and everything beneath it address nothing in the Draft
+// (those positions become addressable through an instantiated item or key).
+// The root's is the empty path.
+func (row *treeRow) draftFieldPath() (string, bool) {
+	if row.parent == nil {
+		return "", true
+	}
+	prefix, addressable := row.parent.draftFieldPath()
+	if !addressable {
+		return "", false
+	}
+	switch row.kind {
+	case rowPlaceholder:
+		return "", false
+	case rowItem:
+		return fmt.Sprintf("%s[%d]", prefix, row.index), true
+	case rowKey:
+		return prefix + "[" + strconv.Quote(row.key) + "]", true
+	default:
+		if prefix == "" {
+			return row.label, true
+		}
+		return prefix + "." + row.label, true
+	}
 }
 
 // rowMissingRequired marks a required-but-unset field: the Draft's current
-// missing required chain names the row's Field Path. Item and value rows
-// share their parent's Field Path and never carry the marker themselves.
+// missing required chain names the row's Draft-level Field Path — so an
+// instantiated item's required fields flag as soon as the item exists
+// (contextual requiredness). Placeholder rows address nothing in the Draft
+// and never carry the marker.
 func (c compose) rowMissingRequired(row *treeRow) bool {
-	return extendsParent(row) && c.missing[row.node.FieldPath()]
+	path, addressable := row.draftFieldPath()
+	return addressable && path != "" && c.missing[path]
 }
 
 // sharedChildLabel names a child Node that shares its parent's Field Path:
@@ -340,6 +486,12 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 	if c.editor != nil {
 		return c.updateEditor(key), nil
 	}
+	if c.keyPrompt != nil {
+		return c.updateKeyPrompt(key), nil
+	}
+	if c.unset != nil {
+		return c.updateUnsetConfirm(key), nil
+	}
 	if c.discard != discardNone {
 		return c.updateDiscardConfirm(key)
 	}
@@ -375,6 +527,10 @@ func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
 		return c, nil
 	case "enter":
 		return c.pressEnter(), nil
+	case "a":
+		return c.pressAdd(), nil
+	case "d":
+		return c.pressUnset(), nil
 	case "?":
 		c.helpOpen = true
 		return c, nil
@@ -410,7 +566,7 @@ func (c compose) updateEditor(key tea.KeyMsg) compose {
 func (c compose) confirmEditor() compose {
 	value, err := c.editor.confirmValue()
 	if err == nil {
-		err = c.draft.Set(c.editor.row.node.FieldPath(), value)
+		err = c.draft.Set(c.editor.path, value)
 	}
 	if err != nil {
 		edited := *c.editor
@@ -458,6 +614,318 @@ func (c compose) updateDiscardConfirm(key tea.KeyMsg) (compose, tea.Cmd) {
 		c.discard = discardNone
 	}
 	return c, nil
+}
+
+// keyPrompt is `a`'s inline key prompt over a map-shaped node: the collection
+// row it adds to, the type-to-enter buffer, and the last confirm's inline
+// rejection (a duplicate key, an empty one).
+type keyPrompt struct {
+	row       *treeRow
+	input     string
+	rejection string
+}
+
+// unsetConfirm is `d`'s destructive confirm: the row being unset, its
+// Draft-level Field Path, and how many filled values the Draft reports the
+// unset would discard.
+type unsetConfirm struct {
+	row   *treeRow
+	path  string
+	count int
+}
+
+// prompt is the confirm's footer line, count included — the "how much am I
+// about to lose" the Draft layer feeds the destructive key.
+func (u unsetConfirm) prompt() string {
+	noun := "values"
+	if u.count == 1 {
+		noun = "value"
+	}
+	return fmt.Sprintf("discard %d %s under %s? y/enter discard · n/esc keep", u.count, noun, u.path)
+}
+
+// pressAdd is `a` in navigate mode (DESIGN.md — Keybindings: mutation verbs):
+// on an array node it appends an item; on a map-shaped node it opens the
+// inline key prompt; anywhere else it is a no-op with a hint-bar flash — not
+// an error state.
+func (c compose) pressAdd() compose {
+	row := c.focused()
+	if row == nil || !c.loadRow(row) {
+		return c
+	}
+
+	collectionPath, addressable := row.draftFieldPath()
+	if !addressable {
+		c.notice = row.node.FieldPath() + " sits under an uninstantiated collection — " +
+			"a adds items and keys on the collection node itself"
+		return c
+	}
+	items, value := collectionPlaceholders(row)
+	switch {
+	case items != nil:
+		return c.appendItem(row, collectionPath)
+	case value != nil:
+		c.keyPrompt = &keyPrompt{row: row}
+		return c
+	default:
+		c.notice = "a appends array items and adds map keys — " + rowDisplayName(row) +
+			" is not an array or a map-shaped object"
+		return c
+	}
+}
+
+// appendItem instantiates the array's next item in the Draft, grows its [n]
+// row before the [items] placeholder, and moves the focus into it.
+func (c compose) appendItem(row *treeRow, collectionPath string) compose {
+	if _, err := c.draft.AppendItem(collectionPath); err != nil {
+		c.notice = err.Error()
+		return c
+	}
+
+	item := newItemRow(row, sharedChildNode(row), c.draft.ItemCount(collectionPath)-1)
+	c.insertInstantiatedRow(row, item)
+	c.rebuildRows()
+	c.focusRow(item)
+	c.refreshCompleteness()
+	return c
+}
+
+// updateKeyPrompt routes one key press into the open key prompt, under the
+// modal grammar: Enter confirms the typed key into the Draft, Esc cancels
+// without touching it, and printable keys type — any typing clears a
+// lingering rejection, which belongs to the confirm it answered.
+func (c compose) updateKeyPrompt(key tea.KeyMsg) compose {
+	prompt := *c.keyPrompt
+	switch {
+	case key.String() == "esc":
+		c.keyPrompt = nil
+		return c
+	case key.String() == "enter":
+		return c.confirmKeyPrompt()
+	case key.String() == "backspace":
+		prompt.rejection = ""
+		if prompt.input != "" {
+			runes := []rune(prompt.input)
+			prompt.input = string(runes[:len(runes)-1])
+		}
+	case key.Type == tea.KeySpace:
+		prompt.rejection = ""
+		prompt.input += " "
+	case key.Type == tea.KeyRunes && !key.Alt:
+		prompt.rejection = ""
+		prompt.input += string(key.Runes)
+	}
+	c.keyPrompt = &prompt
+	return c
+}
+
+// confirmKeyPrompt confirms the typed key into the Draft. A rejection — an
+// empty key, or a key the Draft already holds — renders inline in the prompt
+// and commits nothing; a confirmed key grows the entry's row, sorted among
+// its key siblings, and moves the focus into it.
+func (c compose) confirmKeyPrompt() compose {
+	prompt := *c.keyPrompt
+	if prompt.input == "" {
+		prompt.rejection = "a map entry needs a key — type one, or Esc cancels"
+		c.keyPrompt = &prompt
+		return c
+	}
+
+	collectionPath, _ := prompt.row.draftFieldPath()
+	if _, err := c.draft.AddKey(collectionPath, prompt.input); err != nil {
+		prompt.rejection = err.Error()
+		c.keyPrompt = &prompt
+		return c
+	}
+
+	c.keyPrompt = nil
+	entry := newKeyRow(prompt.row, sharedChildNode(prompt.row), prompt.input)
+	c.insertInstantiatedRow(prompt.row, entry)
+	c.rebuildRows()
+	c.focusRow(entry)
+	c.refreshCompleteness()
+	return c
+}
+
+// viewLines renders the open key prompt for the detail pane.
+func (p keyPrompt) viewLines() []string {
+	lines := []string{
+		highlightedStyle.Render(p.label()),
+		"adding a map entry — type its key",
+		"",
+		"> " + p.input + "▏",
+	}
+	if p.rejection != "" {
+		lines = append(lines, "", highlightedStyle.Render(p.rejection))
+	}
+	return lines
+}
+
+// label previews the entry the prompt is composing, in the Draft-level
+// bracket grammar the confirmed row will carry.
+func (p keyPrompt) label() string {
+	return keyRowLabel(p.row, p.input)
+}
+
+// pressUnset is `d` in navigate mode (DESIGN.md — Keybindings: mutation
+// verbs): unset — sparse semantics, back to the dimmed placeholder, never
+// "set to empty". A set scalar unsets instantly; a subtree with filled
+// descendants confirms with the Draft-reported discard count first; a node
+// the Draft holds nothing at is a no-op.
+func (c compose) pressUnset() compose {
+	row := c.focused()
+	if row == nil {
+		return c
+	}
+	path, addressable := row.draftFieldPath()
+	if !addressable || path == "" {
+		return c
+	}
+	count, held := c.draft.DiscardCount(path)
+	if !held {
+		return c
+	}
+
+	if _, filledHere := c.draft.ValueAt(path); count == 0 || (count == 1 && filledHere) {
+		// The row's own value (or an instantiated-but-empty item or key):
+		// nothing beneath it is lost, so the unset is instant.
+		return c.performUnset(row, path)
+	}
+	c.unset = &unsetConfirm{row: row, path: path, count: count}
+	return c
+}
+
+// updateUnsetConfirm applies one key press to the open destructive confirm:
+// y/Enter discards the subtree, n/Esc keeps composing, and everything else
+// is inert.
+func (c compose) updateUnsetConfirm(key tea.KeyMsg) compose {
+	confirm := *c.unset
+	switch key.String() {
+	case "enter", "y":
+		c.unset = nil
+		return c.performUnset(confirm.row, confirm.path)
+	case "esc", "n":
+		c.unset = nil
+	}
+	return c
+}
+
+// performUnset removes the entry from the Draft and reconciles the tree: an
+// item or key row leaves the tree (an item's later siblings renumber down by
+// one, per the Draft's renumbering contract), while a schema-defined field
+// row stays — its subtree collapses and reloads from the Draft on the next
+// expansion, so any instantiated rows beneath it are gone with the values.
+func (c compose) performUnset(row *treeRow, path string) compose {
+	if _, err := c.draft.Unset(path); err != nil {
+		c.notice = err.Error()
+		return c
+	}
+
+	switch row.kind {
+	case rowItem, rowKey:
+		removeInstantiatedRow(row)
+	default:
+		if !row.leaf {
+			row.loaded, row.expanded, row.children = false, false, nil
+			c.loadRow(row)
+		}
+	}
+	c.rebuildRows()
+	c.focusIndex(c.cursor)
+	c.refreshCompleteness()
+	return c
+}
+
+// removeInstantiatedRow deletes an item or key row from its parent's
+// children; an item's later item siblings renumber down by one, mirroring
+// the Draft's renumbering contract — their old paths now address their
+// successors, and every descendant's Draft-level Field Path follows, because
+// paths are spelled through the parent chain.
+func removeInstantiatedRow(row *treeRow) {
+	siblings := row.parent.children
+	position := slices.Index(siblings, row)
+	if position < 0 {
+		return
+	}
+	row.parent.children = slices.Delete(siblings, position, position+1)
+
+	if row.kind != rowItem {
+		return
+	}
+	for _, sibling := range row.parent.children {
+		if sibling.kind == rowItem && sibling.index > row.index {
+			sibling.index--
+			sibling.label = itemRowLabel(row.parent, sibling.index)
+		}
+	}
+}
+
+// insertInstantiatedRow places a fresh item or key row among the collection
+// row's children — an item right before its [items] placeholder (items stay
+// in index order), a key sorted among its key siblings — and expands the
+// collection so the new row is visible and truthfully indicated.
+func (c *compose) insertInstantiatedRow(row *treeRow, entry *treeRow) {
+	position := len(row.children)
+	for index, child := range row.children {
+		if entry.kind == rowKey && child.kind == rowKey && child.key > entry.key {
+			position = index
+			break
+		}
+		if child.kind == rowPlaceholder && placeholderMatches(child, entry.kind) {
+			position = index
+			break
+		}
+	}
+	row.children = slices.Insert(row.children, position, entry)
+	c.loadRow(entry)
+	c.expandRow(row)
+}
+
+// placeholderMatches pairs a placeholder row with the instantiated row kind
+// it stands in for: "[items]" for items, "[value]" for keys.
+func placeholderMatches(placeholder *treeRow, kind rowKind) bool {
+	if kind == rowItem {
+		return placeholder.label == "[items]"
+	}
+	return placeholder.label == "[value]"
+}
+
+// collectionPlaceholders finds a loaded row's "[items]" and "[value]"
+// placeholder children — the structural mark of an array or a map-shaped
+// object. A bare untyped or schema-blind node has neither, so the mutation
+// verbs stay no-ops there.
+func collectionPlaceholders(row *treeRow) (items, value *treeRow) {
+	for _, child := range row.children {
+		if child.kind != rowPlaceholder {
+			continue
+		}
+		if child.label == "[items]" {
+			items = child
+		} else {
+			value = child
+		}
+	}
+	return items, value
+}
+
+// sharedChildNode is the collection row's shared child Node — the array's
+// item schema or the map's value schema — that instantiated rows are grown
+// over.
+func sharedChildNode(row *treeRow) *schema.Node {
+	items, value := collectionPlaceholders(row)
+	if items != nil {
+		return items.node
+	}
+	return value.node
+}
+
+// rowDisplayName names a row for notices: its Field Path when it has one,
+// its label at the root.
+func rowDisplayName(row *treeRow) string {
+	if row.node.FieldPath() != "" {
+		return row.node.FieldPath()
+	}
+	return row.label
 }
 
 // refreshCompleteness recomputes the Draft's completeness — the missing
@@ -604,11 +1072,12 @@ func (c compose) pressEnter() compose {
 	return c.openEditor(row)
 }
 
-// openEditor opens the leaf's value widget. A leaf no widget can serve yet
+// openEditor opens the leaf's value widget. A leaf no widget can serve
 // leaves a one-line hint instead of opening anything: a schema-blind leaf
-// routes to the raw-YAML escape hatch, a leaf beneath an array or map
-// crossing waits for the mutation verbs' item and key rows, and a leaf
-// without a scalar type has nothing to type into.
+// routes to the raw-YAML escape hatch, a leaf inside an uninstantiated
+// placeholder subtree needs an item or key first (`a` on the collection),
+// and a leaf without a scalar type has nothing to type into. An instantiated
+// item or key leaf edits exactly like an ordinary leaf.
 func (c compose) openEditor(row *treeRow) compose {
 	meta, err := row.node.Metadata()
 	if err != nil {
@@ -620,9 +1089,10 @@ func (c compose) openEditor(row *treeRow) compose {
 			" — raw YAML composes it, and the escape hatch's editor isn't wired yet"
 		return c
 	}
-	if !draftAddressable(row) {
-		c.notice = row.node.FieldPath() + " is inside an array or map — " +
-			"its item and key rows land with the mutation verbs"
+	path, addressable := row.draftFieldPath()
+	if !addressable {
+		c.notice = row.node.FieldPath() + " sits under an uninstantiated collection — " +
+			"press a on the collection node to add its first item or key"
 		return c
 	}
 	kind, editable := widgetFor(meta)
@@ -632,23 +1102,10 @@ func (c compose) openEditor(row *treeRow) compose {
 		return c
 	}
 
-	value, filled := c.draft.ValueAt(row.node.FieldPath())
-	editor := newFieldEditor(row, meta, kind, value, filled)
+	value, filled := c.draft.ValueAt(path)
+	editor := newFieldEditor(row, path, meta, kind, value, filled)
 	c.editor = &editor
 	return c
-}
-
-// draftAddressable reports whether the row's position is addressable by its
-// schema-level Field Path alone — no array or map crossing between it and
-// the root. A leaf beneath a crossing needs an item or key selector, and
-// those rows arrive with the mutation verbs.
-func draftAddressable(row *treeRow) bool {
-	for current := row; current.parent != nil; current = current.parent {
-		if !extendsParent(current) {
-			return false
-		}
-	}
-	return true
 }
 
 // toggleFocused toggles expansion on a parent row; a loaded leaf has
@@ -732,12 +1189,21 @@ func (c compose) paneWidths() (int, int) {
 }
 
 // breadcrumb is the persistent Field Path breadcrumb: the Kind in glossary
-// form, extended by the focused node's schema-level Field Path — at the
-// root it shows the Kind alone, e.g. "apps/v1 Deployment".
+// form, extended by the focused row's Draft-level Field Path — bracket
+// selectors included on instantiated items and keys — or its schema-level
+// Field Path inside a placeholder subtree. At the root it shows the Kind
+// alone, e.g. "apps/v1 Deployment".
 func (c compose) breadcrumb() string {
 	crumb := kindDisplayName(c.kind)
-	if row := c.focused(); row != nil && row.node.FieldPath() != "" {
-		crumb += " › " + row.node.FieldPath()
+	row := c.focused()
+	if row == nil {
+		return crumb
+	}
+	if path, addressable := row.draftFieldPath(); addressable && path != "" {
+		return crumb + " › " + path
+	}
+	if row.node.FieldPath() != "" {
+		return crumb + " › " + row.node.FieldPath()
 	}
 	return crumb
 }
@@ -766,10 +1232,13 @@ func (c compose) statusLine() string {
 	return highlightedStyle.Render(fmt.Sprintf("%s %d required %s missing", requiredMarker, count, noun))
 }
 
-// footer is the view's bottom line: the discard confirm while one is open,
-// a non-fatal notice until the next key press, the contextual hint bar
-// otherwise.
+// footer is the view's bottom line: an open confirm — the destructive
+// unset's or the Draft discard's — a non-fatal notice until the next key
+// press, the contextual hint bar otherwise.
 func (c compose) footer() string {
+	if c.unset != nil {
+		return highlightedStyle.Render(c.unset.prompt())
+	}
 	if c.discard != discardNone {
 		return highlightedStyle.Render(c.discard.prompt())
 	}
@@ -780,16 +1249,45 @@ func (c compose) footer() string {
 }
 
 // hints is the contextual one-line hint bar: the open value widget's own
-// hints in edit mode, the search overlay's while it is open, the
-// navigate-mode hints otherwise.
+// hints in edit mode, the key prompt's while it is open, the search
+// overlay's while it is open, the navigate-mode hints otherwise.
 func (c compose) hints() string {
 	if c.editor != nil {
 		return c.editor.hints()
 	}
+	if c.keyPrompt != nil {
+		return keyPromptHints
+	}
 	if c.searchOpen {
 		return searchHints
 	}
-	return composeHints
+	return c.navigateHints()
+}
+
+// navigateHints prepends the mutation verbs the focused row serves right now
+// (DESIGN.md — Keybindings: the hint bar is contextual to the focused view):
+// `a` on an array or map-shaped node, `d` wherever the Draft holds something
+// to unset — and neither on rows they would no-op on.
+func (c compose) navigateHints() string {
+	row := c.focused()
+	if row == nil || !row.loaded {
+		return composeHints
+	}
+	path, addressable := row.draftFieldPath()
+	if !addressable {
+		return composeHints
+	}
+
+	verbs := ""
+	if items, value := collectionPlaceholders(row); path != "" && items != nil {
+		verbs += "a append item · "
+	} else if path != "" && value != nil {
+		verbs += "a add key · "
+	}
+	if _, held := c.draft.DiscardCount(path); held && path != "" {
+		verbs += "d unset · "
+	}
+	return verbs + composeHints
 }
 
 // bodyView renders the pane area: the `?` help overlay or the `/` search
@@ -874,19 +1372,24 @@ func (c compose) renderTreeRow(index int) string {
 }
 
 // rowValue is the Draft state a leaf row shows after its label: the open
-// widget's live buffer while the row is being edited, the value the Draft
-// holds once one is set, or the schema default as a dimmed placeholder —
-// visually distinct from a set value, and never in the output (DESIGN.md —
-// Flow §6).
+// widget's live buffer while the row is being edited, the key prompt's live
+// buffer while the row is prompting, the value the Draft holds once one is
+// set, or the schema default as a dimmed placeholder — visually distinct
+// from a set value, and never in the output (DESIGN.md — Flow §6).
 func (c compose) rowValue(row *treeRow) string {
 	if c.editor != nil && c.editor.row == row {
 		return ": " + c.editor.inlineValue()
 	}
-	if !row.loaded || !row.leaf || !extendsParent(row) {
+	if c.keyPrompt != nil && c.keyPrompt.row == row {
+		return ` + ["` + c.keyPrompt.input + `▏"]`
+	}
+	if !row.loaded || !row.leaf || row.kind == rowPlaceholder {
 		return ""
 	}
-	if value, filled := c.draft.ValueAt(row.node.FieldPath()); filled {
-		return ": " + renderScalar(value.Data)
+	if path, addressable := row.draftFieldPath(); addressable {
+		if value, filled := c.draft.ValueAt(path); filled {
+			return ": " + renderScalar(value.Data)
+		}
 	}
 	meta, err := row.node.Metadata()
 	if err != nil || meta.Default == nil {
@@ -914,6 +1417,9 @@ func (c compose) detailLines() []string {
 	}
 	if c.editor != nil {
 		return c.editor.viewLines()
+	}
+	if c.keyPrompt != nil {
+		return c.keyPrompt.viewLines()
 	}
 	if row.expandErr != nil {
 		return []string{highlightedStyle.Render(row.label), "", "expanding this field failed: " + row.expandErr.Error()}

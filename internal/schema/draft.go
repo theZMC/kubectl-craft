@@ -2,6 +2,8 @@ package schema
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 
 	"k8s.io/kube-openapi/pkg/validation/spec"
@@ -59,20 +61,66 @@ func (d *Draft) Set(fieldPath string, value any) error {
 // and keys, positions inside a raw-YAML graft (opaque by design), and paths
 // the Draft cannot place all read back as unfilled.
 func (d *Draft) ValueAt(fieldPath string) (Value, bool) {
+	entry := d.entryAt(fieldPath)
+	if entry == nil || entry.value == nil {
+		return Value{}, false
+	}
+	return *entry.value, true
+}
+
+// ItemCount reports how many items the Draft has instantiated at the array
+// position a Draft-level Field Path addresses — zero when the Draft holds
+// nothing there. The count is Draft-level: instantiated-but-empty items
+// count too, so it can differ from what Emit spells (emission skips empty
+// items and compacts the rest).
+func (d *Draft) ItemCount(fieldPath string) int {
+	entry := d.entryAt(fieldPath)
+	if entry == nil {
+		return 0
+	}
+	return len(entry.items)
+}
+
+// Keys lists the map keys the Draft has instantiated at the map-shaped
+// position a Draft-level Field Path addresses, sorted — the same
+// deterministic order Instantiated spells them in; empty when the Draft
+// holds nothing there.
+func (d *Draft) Keys(fieldPath string) []string {
+	entry := d.entryAt(fieldPath)
+	if entry == nil {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(entry.keys))
+}
+
+// DiscardCount reports how many filled values Unset at a Draft-level Field
+// Path would discard (a raw-YAML graft counts as one, like Unset itself
+// reports), and whether the Draft holds anything at the position at all —
+// the destructive-key confirm asks here before unsetting, and a position the
+// Draft holds nothing at is unset's no-op.
+func (d *Draft) DiscardCount(fieldPath string) (int, bool) {
+	entry := d.entryAt(fieldPath)
+	if entry == nil {
+		return 0, false
+	}
+	return entry.countValues(), true
+}
+
+// entryAt walks to the entry a Draft-level Field Path addresses without
+// instantiating anything; nil when the Draft holds nothing there, or when
+// the path does not parse.
+func (d *Draft) entryAt(fieldPath string) *draftEntry {
 	segments, err := splitDraftPath(fieldPath)
 	if err != nil {
-		return Value{}, false
+		return nil
 	}
 	entry := d.entries
 	for _, segment := range segments {
 		if entry = entry.lookup(segment); entry == nil {
-			return Value{}, false
+			return nil
 		}
 	}
-	if entry.value == nil {
-		return Value{}, false
-	}
-	return *entry.value, true
+	return entry
 }
 
 // Unset removes the entry at a Draft-level Field Path entirely — sparse

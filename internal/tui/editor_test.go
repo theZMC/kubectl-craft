@@ -100,7 +100,7 @@ var _ = Describe("edit mode", func() {
 				"the raw-YAML escape hatch is the schema-blind node's editor, and it isn't wired yet")
 		})
 
-		It("leaves a hint on an array's item row — item selectors arrive with the mutation verbs", func() {
+		It("leaves a hint on an uninstantiated [items] placeholder row — a on the collection adds the first item", func() {
 			model := expandField(composeGadget(), "spec.gears")
 			model, _ = press(model, keyRune('j')) // the [items] row shares its parent's Field Path
 
@@ -110,8 +110,8 @@ var _ = Describe("edit mode", func() {
 			Expect(model.FocusedFieldPath()).To(Equal("spec.gears"))
 			notice, showing := model.Notice()
 			Expect(showing).To(BeTrue(), "an inert Enter must say why, not just do nothing")
-			Expect(notice).To(ContainSubstring("mutation verbs"),
-				"item and key rows are the mutation verbs' business, and they aren't wired yet")
+			Expect(notice).To(ContainSubstring("press a on the collection"),
+				"the placeholder subtree is structure browsing — instantiating goes through the mutation verbs")
 		})
 	})
 

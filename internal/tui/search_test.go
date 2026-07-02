@@ -186,12 +186,12 @@ var _ = Describe("the / field-search overlay", func() {
 				"every ancestor along the path is expanded")
 		})
 
-		It("lands on the collection node when the path crosses an array — M2 instantiates no items", func() {
+		It("lands on the collection node when the path crosses an array the Draft holds no items at", func() {
 			model := jumpTo(openSearch(composeDeployment()),
 				"containers.image", "spec.template.spec.containers.image")
 
 			Expect(model.FocusedFieldPath()).To(Equal("spec.template.spec.containers"),
-				"crossing an array with nothing instantiated lands on the collection node — where `a` adds the first item, come M3")
+				"crossing an array with nothing instantiated lands on the collection node — where `a` adds the first item")
 			Expect(model.Breadcrumb()).To(Equal("apps/v1 Deployment › spec.template.spec.containers"))
 
 			shared := 0
@@ -204,7 +204,25 @@ var _ = Describe("the / field-search overlay", func() {
 				"the collection node itself is the landing: its [items] row stays unexpanded")
 		})
 
-		It("lands on the map node when the path crosses a map-shaped object", func() {
+		It("lands inside the first instantiated item when the path crosses an array with items", func() {
+			model := focusField(widen(composeDeployment()), "spec")
+			model = expandField(model, "spec")
+			model = expandField(model, "spec.template")
+			model = expandField(model, "spec.template.spec")
+			model = focusField(model, "spec.template.spec.containers")
+			model, _ = press(model, keyRune('a')) // focus moves into containers[0]
+			model, _ = press(model, keyRune('k'), keyRune('a'))
+			Expect(model.FocusedDraftPath()).To(Equal("spec.template.spec.containers[1]"))
+
+			model = jumpTo(openSearch(model), "containers.image", "spec.template.spec.containers.image")
+
+			Expect(model.FocusedFieldPath()).To(Equal("spec.template.spec.containers.image"))
+			Expect(model.FocusedDraftPath()).To(Equal("spec.template.spec.containers[0].image"),
+				"a crossing with instantiated entries lands on the first instantiated item, not the placeholder")
+			Expect(model.Breadcrumb()).To(Equal("apps/v1 Deployment › spec.template.spec.containers[0].image"))
+		})
+
+		It("lands on the map node when the path crosses a map-shaped object the Draft holds no keys at", func() {
 			rack := composeKind("craft.example.com", "v5", "Rack", "apis/craft.example.com/v5")
 			model := jumpTo(openSearch(openKind(newShell(), rack)), "slots.label", "spec.slots.label")
 
@@ -212,12 +230,26 @@ var _ = Describe("the / field-search overlay", func() {
 				"a map with no instantiated keys is the same landing branch as an empty array")
 		})
 
+		It("lands inside the first instantiated key — sorted order — when the map holds entries", func() {
+			rack := composeKind("craft.example.com", "v5", "Rack", "apis/craft.example.com/v5")
+			model := expandField(widen(openKind(newShell(), rack)), "spec")
+			model = focusField(model, "spec.slots")
+			model = addMapKey(model, "zulu")      // focus moves into slots["zulu"]
+			model, _ = press(model, keyRune('k')) // back up to the collection node
+			model = addMapKey(model, "alpha")
+
+			model = jumpTo(openSearch(model), "slots.label", "spec.slots.label")
+
+			Expect(model.FocusedDraftPath()).To(Equal(`spec.slots["alpha"].label`),
+				"the first instantiated key is the first in the Draft's sorted key order")
+		})
+
 		It("lands on the first collection crossed, not the deepest reachable row", func() {
 			model := jumpTo(openSearch(openKind(newShell(), crdKind())),
 				"openapiv3schema.properties", "spec.versions.schema.openAPIV3Schema.properties")
 
 			Expect(model.FocusedFieldPath()).To(Equal("spec.versions"),
-				"spec.versions is the first array the path crosses, and nothing is instantiated in M2")
+				"spec.versions is the first array the path crosses, and the Draft holds no items there")
 		})
 
 		It("resets the completed search on the next open, keeping the candidates", func() {

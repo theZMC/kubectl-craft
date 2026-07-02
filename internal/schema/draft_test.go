@@ -252,6 +252,66 @@ var _ = Describe("the Draft", func() {
 		})
 	})
 
+	When("the tree reads collection state back from the Draft", func() {
+		It("counts instantiated items at an array position, empty items included", func() {
+			draft := deploymentDraft()
+			Expect(draft.ItemCount("spec.template.spec.containers")).To(BeZero(),
+				"a position the Draft holds nothing at counts zero")
+
+			_, err := draft.AppendItem("spec.template.spec.containers")
+			Expect(err).NotTo(HaveOccurred())
+			mustSet(draft, "spec.template.spec.containers[1].name", "app")
+
+			Expect(draft.ItemCount("spec.template.spec.containers")).To(Equal(2),
+				"the count is Draft-level: an instantiated-but-empty item counts, whatever emission compacts")
+		})
+
+		It("lists instantiated map keys sorted, and nothing where the Draft holds no map", func() {
+			draft := deploymentDraft()
+			Expect(draft.Keys("spec.template.metadata.labels")).To(BeEmpty())
+
+			for _, key := range []string{"zone", "app"} {
+				_, err := draft.AddKey("spec.template.metadata.labels", key)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			Expect(draft.Keys("spec.template.metadata.labels")).To(Equal([]string{"app", "zone"}),
+				"keys list in the same sorted order Instantiated spells them")
+		})
+
+		It("reports the discard count an unset would report, before anything is unset", func() {
+			draft := deploymentDraft()
+			_, held := draft.DiscardCount("spec")
+			Expect(held).To(BeFalse(), "a position the Draft holds nothing at is unset's no-op")
+
+			mustSet(draft, "spec.replicas", 3)
+			mustSet(draft, "spec.template.spec.containers[0].name", "app")
+
+			count, held := draft.DiscardCount("spec")
+			Expect(held).To(BeTrue())
+			Expect(count).To(Equal(2), "the destructive-key confirm asks here before unsetting")
+
+			count, held = draft.DiscardCount("spec.replicas")
+			Expect(held).To(BeTrue())
+			Expect(count).To(Equal(1))
+
+			discarded, err := draft.Unset("spec")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(discarded).To(Equal(2), "DiscardCount and Unset tell the same story")
+		})
+
+		It("reports an instantiated-but-empty item as held with nothing to discard", func() {
+			draft := deploymentDraft()
+			itemPath, err := draft.AppendItem("spec.template.spec.containers")
+			Expect(err).NotTo(HaveOccurred())
+
+			count, held := draft.DiscardCount(itemPath)
+
+			Expect(held).To(BeTrue(), "the empty item is an explicit position the Draft holds")
+			Expect(count).To(BeZero())
+		})
+	})
+
 	When("setting instantiates ancestors implicitly and completeness delegates to contextual requiredness", func() {
 		It("instantiates spec by setting spec.replicas, surfacing the DeploymentSpec required fields", func() {
 			draft := deploymentDraft()

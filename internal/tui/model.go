@@ -500,6 +500,37 @@ func (m Model) Editing() bool {
 	return m.view == composing && m.compose.editor != nil
 }
 
+// FocusedDraftPath returns the focused row's Draft-level Field Path —
+// bracket selectors included on instantiated items and keys. Empty at the
+// root, on the placeholder rows and everything beneath them (those
+// positions address nothing in the Draft), and when compose is not open.
+func (m Model) FocusedDraftPath() string {
+	if m.view != composing {
+		return ""
+	}
+	row := m.compose.focused()
+	if row == nil {
+		return ""
+	}
+	path, addressable := row.draftFieldPath()
+	if !addressable {
+		return ""
+	}
+	return path
+}
+
+// PromptingForKey reports whether `a` on a map-shaped node is prompting
+// inline for the new entry's key.
+func (m Model) PromptingForKey() bool {
+	return m.view == composing && m.compose.keyPrompt != nil
+}
+
+// ConfirmingUnset reports whether `d` is confirming the discard of a subtree
+// with filled descendants.
+func (m Model) ConfirmingUnset() bool {
+	return m.view == composing && m.compose.unset != nil
+}
+
 // ConfirmingDiscard reports whether the compose view is asking to confirm
 // that Esc-to-picker or `q`-to-quit may discard the non-empty Draft.
 func (m Model) ConfirmingDiscard() bool {

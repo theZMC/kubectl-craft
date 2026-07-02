@@ -328,11 +328,8 @@ func (c compose) landDeepLink(fieldPath string) compose {
 // landOn is the field search's landing rule (DESIGN.md — Flow §5): expand
 // every ancestor along the match's schema-level Field Path and move the
 // focus to the match. When the path crosses an array or a map, the jump
-// goes into the first instantiated item — and when none exist, it lands on
-// the collection node itself (where `a` adds one, come M3). M2 composes no
-// Draft, so nothing is ever instantiated and every crossing lands on the
-// collection node; the branch stays real because M3's Draft reuses this
-// rule unchanged.
+// goes into the first instantiated item — and when the Draft holds none, it
+// lands on the collection node itself, where `a` adds one.
 func (c *compose) landOn(fieldPath string) {
 	target := c.root
 	for _, segment := range strings.Split(fieldPath, ".") {
@@ -371,10 +368,19 @@ func (c *compose) stepToward(row *treeRow, segment string) *treeRow {
 }
 
 // firstInstantiatedItem is the landing rule's Draft-side branch: the first
-// instantiated item of an array row, or the first instantiated key's value
-// of a map row. M2 composes no Draft, so nothing is ever instantiated and
-// every crossing lands on the collection node; M3's Draft gives this a real
-// answer.
-func (*compose) firstInstantiatedItem(*treeRow) *treeRow {
+// instantiated item of an array row, or the first instantiated key's entry
+// of a map row — the rows loadRow grows from the Draft's ItemCount and Keys
+// (items in index order, keys sorted). Nil when the Draft has instantiated
+// nothing at the collection: that crossing lands on the collection node
+// itself, where `a` adds the first entry.
+func (c *compose) firstInstantiatedItem(row *treeRow) *treeRow {
+	if !c.loadRow(row) {
+		return nil
+	}
+	for _, child := range row.children {
+		if child.kind == rowItem || child.kind == rowKey {
+			return child
+		}
+	}
 	return nil
 }

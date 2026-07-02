@@ -90,7 +90,7 @@ var _ = Describe("the deep-linked Session entry", func() {
 			Expect(noticed).To(BeFalse())
 		})
 
-		It("lands an array crossing on the collection node — nothing is instantiated in M2", func() {
+		It("lands an array crossing on the collection node — a fresh Draft instantiates nothing", func() {
 			model := launchDeepLinked(kindNamed("Deployment", "v1"), "spec.template.spec.containers.name")
 
 			Expect(model.ComposeOpen()).To(BeTrue())

@@ -57,6 +57,11 @@ type fieldEditor struct {
 	meta schema.Metadata
 	kind editorKind
 
+	// path is the row's Draft-level Field Path — bracket selectors
+	// included on an instantiated item or key leaf — the position the
+	// confirmed value Sets.
+	path string
+
 	// input is the text and numeric widgets' buffer.
 	input string
 
@@ -75,8 +80,8 @@ type fieldEditor struct {
 // Draft already holds prefills the widget; otherwise a boolean or enum
 // widget starts on the schema default when one is declared, and the text
 // widgets start empty — the dimmed placeholder stays a placeholder.
-func newFieldEditor(row *treeRow, meta schema.Metadata, kind editorKind, value schema.Value, filled bool) fieldEditor {
-	editor := fieldEditor{row: row, meta: meta, kind: kind}
+func newFieldEditor(row *treeRow, path string, meta schema.Metadata, kind editorKind, value schema.Value, filled bool) fieldEditor {
+	editor := fieldEditor{row: row, path: path, meta: meta, kind: kind}
 	switch kind {
 	case editorToggle:
 		if filled {
