@@ -6,10 +6,17 @@ package main
 
 import "fmt"
 
+// version is injected at build time by goreleaser via ldflags
+// (-X main.version=...); "dev" identifies a locally built binary.
+var version = "dev"
+
 // placeholder returns the walking-skeleton banner printed until the
 // binary can Compose Manifests from a cluster's Type Schemas.
 func placeholder() string {
-	return "kubectl-craft: compose Kubernetes Manifests from your cluster's live Type Schemas (walking skeleton)"
+	return fmt.Sprintf(
+		"kubectl-craft %s: compose Kubernetes Manifests from your cluster's live Type Schemas (walking skeleton)",
+		version,
+	)
 }
 
 func main() {

@@ -4,3 +4,6 @@
 # Test artifacts
 *.test
 coverage.out
+
+# goreleaser output (snapshot and release builds)
+/dist/

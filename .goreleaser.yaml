@@ -1,0 +1,49 @@
+# Release configuration for the kubectl-craft plugin binary (ADR-0005).
+# Snapshot builds run in CI on build-relevant PRs; tag pushes publish to
+# GitHub Releases. Krew manifest/submission, signing, and brew taps are
+# deliberately out of scope for M0.
+version: 2
+
+project_name: kubectl-craft
+
+builds:
+- main: ./cmd/kubectl-craft
+  # kubectl discovers plugins by the kubectl-<name> binary naming convention.
+  binary: kubectl-craft
+  env:
+  - CGO_ENABLED=0
+  goos:
+  - linux
+  - darwin
+  - windows
+  goarch:
+  - amd64
+  - arm64
+  ldflags:
+  - -s -w -X main.version={{ .Version }}
+
+archives:
+- # Keep the plugin binary name intact inside each archive so extracting it
+  # onto PATH is all a kubectl plugin installation needs.
+  name_template: >-
+    {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+  formats:
+  - tar.gz
+  format_overrides:
+  - goos: windows
+    formats:
+    - zip
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: '{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+    - '^docs'
+    - '^test'
+    - '^chore'

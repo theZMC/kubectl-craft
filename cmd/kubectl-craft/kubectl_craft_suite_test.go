@@ -18,5 +18,9 @@ var _ = Describe("the kubectl-craft binary", func() {
 			Expect(placeholder()).To(ContainSubstring("kubectl-craft"))
 			Expect(placeholder()).To(ContainSubstring("Type Schemas"))
 		})
+
+		It("includes the build-time version in the banner", func() {
+			Expect(placeholder()).To(ContainSubstring(version))
+		})
 	})
 })
