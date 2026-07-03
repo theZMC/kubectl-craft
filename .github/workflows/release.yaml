@@ -65,10 +65,11 @@ jobs:
     - run: goreleaser check
     # The demo GIF ships as a release asset (extra_files in .goreleaser.yaml)
     # that the README and the release notes embed, so render it fresh from
-    # demo.tape against a throwaway k3d cluster (the task installs its own
-    # pinned vhs/ttyd/ffmpeg/k3d toolchain; the runner provides Docker). A
-    # failed render fails the job before anything publishes — re-run the
-    # workflow rather than shipping a release whose demo image 404s.
+    # demo.tape against a throwaway k3d cluster. The task renders through the
+    # pinned ghcr.io/charmbracelet/vhs container image (vhs+ttyd+ffmpeg+fonts as
+    # one self-contained unit; the runner provides Docker, which k3d already
+    # needs). A failed render fails the job before anything publishes — re-run
+    # the workflow rather than shipping a release whose demo image 404s.
     - name: Render the demo GIF shipped as a release asset
       run: mise run demo:render
     - name: Publish the tagged GitHub Release

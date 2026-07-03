@@ -1,31 +1,86 @@
 #!/usr/bin/env bash
-# [MISE] description="Render demo.gif from demo.tape with vhs against the k3d demo cluster (requires Docker)"
+# [MISE] description="Render demo.gif from demo.tape with the pinned vhs container image against the k3d demo cluster (requires Docker)"
 # [MISE] dir="{{config_root}}"
 # [MISE] depends=["demo:cluster"]
-# [MISE] tools={vhs = "0.11.0", "conda:ttyd" = "1.7.7", ffmpeg = "8.1.2", k3d = "5.9.0", kubectl = "1.36.2"}
+# [MISE] tools={k3d = "5.9.0", kubectl = "1.36.2"}
 #
-# ttyd comes from conda-forge: the aqua/GitHub-release ttyd ships no
-# darwin/arm64 binary, and conda-forge covers every platform vhs runs on.
+# Renders through the official vhs container image instead of assembling
+# vhs/ttyd/ffmpeg from separate mise tools. That image bundles the whole
+# recording toolchain (vhs + ttyd + ffmpeg + fonts) as one pinned,
+# self-contained unit, so there are no floating transitive dependencies to
+# drift — the failure mode that made the conda-forge ffmpeg closure ship a
+# libjxl soname mismatch and break every render (#86). Docker is already
+# required here (the k3d demo cluster runs on it). The image is pinned by
+# digest; a floating `latest` would reintroduce the drift this replaces.
 #
-# Builds the kubectl-craft binary, points KUBECONFIG at the demo cluster,
-# and replays demo.tape in a clean scratch directory so the recorded
-# `kubectl craft > gadget.yaml` leaves no strays in the repo. The rendered
-# demo.gif lands in the repo root. Deliberately uncached — the recording is
-# only as fresh as the run that produced it.
+# demo.tape does `Require kubectl` / `Require kubectl-craft` and drives the
+# live cluster, so the container is given:
+#   - kubectl-craft cross-built for the container's linux arch, plus a matching
+#     linux kubectl, both on PATH (NOT the host-native binaries),
+#   - reachability to the k3d API server by joining the cluster's docker network
+#     and pointing the kubeconfig at the in-network loadbalancer (the host
+#     loopback URL k3d hands out is unreachable from another container). This
+#     path works identically on ubuntu CI and darwin Docker Desktop.
+#
+# The tape replays in a mounted scratch directory so the recorded
+# `kubectl craft > gadget.yaml` leaves no strays in the repo; only the rendered
+# demo.gif is moved back to the repo root. Deliberately uncached — the recording
+# is only as fresh as the run that produced it.
 set -euo pipefail
 
+# vhs container image, pinned by multi-arch index digest (Docker resolves the
+# daemon-native variant). Bump deliberately; never float to a mutable tag.
+image="ghcr.io/charmbracelet/vhs:v0.11.0@sha256:9d5fc3dc0c160b0fb1d2212baff07e6bdf3fa9438c504a3237484567302fcf93"
+cluster=kubectl-craft-demo
+# Matches the kubectl mise tool above; the container needs a linux kubectl of
+# the same version, which the host binary can't provide off Apple silicon.
+kubectl_version=v1.36.2
+
 root=$(pwd)
-scratch=$(mktemp -d)
+# Scratch lives inside the repo (gitignored) rather than $TMPDIR: it is bind
+# mounted into the container, and Docker Desktop only reliably shares the host
+# path the repo already sits under — a $TMPDIR under /var/folders or /tmp can
+# mount empty. On Linux CI any path works, so the repo-local dir is the portable
+# choice. The trap removes it; .gitignore keeps a crash-orphaned one uncommitted.
+scratch=$(mktemp -d "$root/.demo-render.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
+mkdir -p "$scratch/bin"
 
-# The tape invokes the plugin through kubectl's discovery convention:
-# a kubectl-craft binary on PATH.
-go build -o "$scratch/bin/kubectl-craft" ./cmd/kubectl-craft
+# Container/daemon arch: amd64 on CI, arm64 on Apple-silicon local. Match both
+# binaries to it so they run inside the container, not on the host.
+arch=$(docker version --format '{{.Server.Arch}}')
 
-k3d kubeconfig get kubectl-craft-demo > "$scratch/kubeconfig"
+# The tape invokes the plugin through kubectl's discovery convention: a
+# kubectl-craft binary on PATH. Cross-build it for the container.
+GOOS=linux GOARCH="$arch" CGO_ENABLED=0 \
+  go build -o "$scratch/bin/kubectl-craft" ./cmd/kubectl-craft
 
-cd "$scratch"
-PATH="$scratch/bin:$PATH" KUBECONFIG="$scratch/kubeconfig" vhs "$root/demo.tape"
-mv demo.gif "$root/demo.gif"
+# A matching linux kubectl (the tape Requires it). Pinned to an immutable,
+# per-version dl.k8s.io URL — reproducible, unlike the drifting conda closure.
+curl -fsSL -o "$scratch/bin/kubectl" \
+  "https://dl.k8s.io/release/${kubectl_version}/bin/linux/${arch}/kubectl"
+chmod +x "$scratch/bin/kubectl"
+
+# k3d hands out a host-loopback server URL that another container can't reach.
+# Rewrite it to the in-network loadbalancer and join that network below; the
+# k3s API cert carries the serverlb hostname as a SAN, so TLS still verifies.
+k3d kubeconfig get "$cluster" > "$scratch/kubeconfig"
+kubectl --kubeconfig "$scratch/kubeconfig" config set-cluster "k3d-$cluster" \
+  --server "https://k3d-$cluster-serverlb:6443"
+
+# Replay the tape inside the image. Scratch is mounted at /demo (cwd), so
+# demo.gif and the recorded gadget.yaml land there, not in the repo. PATH
+# prepends the mounted bin so Require finds kubectl/kubectl-craft while vhs
+# still finds its own ttyd/ffmpeg under /usr/bin.
+docker run --rm \
+  --network "k3d-$cluster" \
+  -v "$scratch:/demo" \
+  -v "$root/demo.tape:/demo/demo.tape:ro" \
+  -w /demo \
+  -e KUBECONFIG=/demo/kubeconfig \
+  -e "PATH=/demo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  "$image" demo.tape
+
+mv "$scratch/demo.gif" "$root/demo.gif"
 
 echo "rendered $root/demo.gif"

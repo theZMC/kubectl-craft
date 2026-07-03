@@ -189,14 +189,21 @@ mise run demo:cluster   # create/reuse the k3d demo cluster, install the CRDs
 mise run demo:render    # build the binary, replay demo.tape, write demo.gif
 ```
 
-The vhs toolchain (vhs, ttyd, ffmpeg) and k3d/kubectl are pinned as task-scoped
-tools on the tasks themselves, not in `[tools]`, so `mise install` and CI stay
-lean. Delete the cluster with `k3d cluster delete kubectl-craft-demo`. The
-rendered `demo.gif` (~2.4MB) is gitignored and published as a release asset
-rather than committed — a multi-megabyte binary that re-renders on every polish
-pass is history the repo doesn't need, and it outweighs the pre-commit 500KB
-large-file cap. The release workflow runs `mise run demo:render` on every tag
-push and goreleaser uploads the result (`release.extra_files` in
-[`.goreleaser.yaml`](.goreleaser.yaml)), so the published recording is always as
-fresh as the release it shipped with. Regenerate it locally whenever the flow or
-the keymap changes to check the recording still tells the story.
+The recording toolchain (vhs, ttyd, ffmpeg, fonts) comes from the pinned
+`ghcr.io/charmbracelet/vhs` container image that `demo:render` runs — one
+self-contained unit with no floating transitive dependencies to drift, so the
+render is reproducible (it needs Docker, which the k3d cluster already
+requires). The task cross-builds `kubectl-craft` for the container's linux arch,
+fetches a matching linux `kubectl`, and joins the k3d docker network so the tape
+reaches the cluster; that path is identical on Linux CI and macOS Docker
+Desktop. Only k3d and kubectl are pinned as task-scoped tools on the tasks
+themselves, not in `[tools]`, so `mise install` and CI stay lean. Delete the
+cluster with `k3d cluster delete kubectl-craft-demo`. The rendered `demo.gif`
+(~2.4MB) is gitignored and published as a release asset rather than committed —
+a multi-megabyte binary that re-renders on every polish pass is history the repo
+doesn't need, and it outweighs the pre-commit 500KB large-file cap. The release
+workflow runs `mise run demo:render` on every tag push and goreleaser uploads
+the result (`release.extra_files` in [`.goreleaser.yaml`](.goreleaser.yaml)), so
+the published recording is always as fresh as the release it shipped with.
+Regenerate it locally whenever the flow or the keymap changes to check the
+recording still tells the story.

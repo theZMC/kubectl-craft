@@ -15,3 +15,7 @@ coverage.out
 # not committed: it re-renders on every polish pass and outweighs the
 # repo's 500KB large-file cap. demo.tape is the source of truth.
 /demo.gif
+
+# Scratch dir the demo render bind mounts into the vhs container (must sit under
+# the repo so Docker Desktop shares it); removed on exit, ignored if orphaned.
+/.demo-render.*
