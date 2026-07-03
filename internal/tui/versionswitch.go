@@ -328,9 +328,7 @@ func (c compose) landAfterSwitch(fieldPath string) compose {
 	if fieldPath == "" {
 		return c
 	}
-	if c.search.candidates == nil {
-		c.search.candidates = c.root.node.FieldPaths()
-	}
+	c = c.ensureCandidates()
 	if !slices.Contains(c.search.candidates, fieldPath) {
 		return c
 	}

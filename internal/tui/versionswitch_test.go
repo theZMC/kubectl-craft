@@ -158,6 +158,25 @@ var _ = Describe("the version switch", func() {
 			}), "the switch fetches the target version's group document through the existing lazy path")
 		})
 
+		It("keeps the `/` field search whole over the rebuilt view: the open lists the target version's Field Paths and keystrokes re-rank them", func() {
+			model := composeWidgetV1(corpusFetcher())
+			model = expandField(model, "spec")
+			model = confirmLeaf(model, "spec.size", "5")
+			model = switchWidgetToV2(model)
+			Expect(model.FocusedFieldPath()).To(Equal("spec.size"),
+				"the landing after the switch already enumerated the fresh view's candidate set")
+
+			model, _ = press(model, keyRune('/'))
+			Expect(model.SearchOpen()).To(BeTrue())
+			Expect(model.SearchMatches()).NotTo(BeEmpty(),
+				"the overlay's open lists the target version's whole Type Schema")
+
+			model = typeFilter(model, "spec.size")
+			match, ok := model.HighlightedSearchMatch()
+			Expect(ok).To(BeTrue(), "a keystroke re-ranks over the rebuilt candidate set")
+			Expect(match.FieldPath).To(Equal("spec.size"))
+		})
+
 		It("shows the loading state for the target version while its group document travels", func() {
 			model := composeWidgetV1(corpusFetcher())
 			model, cmd := requestSwitch(model)

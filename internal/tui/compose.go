@@ -1206,9 +1206,7 @@ func (c *compose) refreshCompleteness() {
 // Kind's schema-level Field Paths on the first open — the candidate set is
 // the Kind's whole Type Schema, not the tree's expansion state.
 func (c compose) openSearch() compose {
-	if c.search.candidates == nil {
-		c.search.candidates = c.root.node.FieldPaths()
-	}
+	c = c.ensureCandidates()
 	// M2's only scope; the DRAFT scope's Tab toggle switches this field
 	// when the Draft lands (DESIGN.md — Flow §5).
 	c.search.scope = scopeSchema

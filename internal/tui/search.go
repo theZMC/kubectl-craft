@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -55,8 +56,24 @@ type fieldSearch struct {
 	// order, enumerated once per compose view on the overlay's first open.
 	candidates []string
 
+	// lowered memoizes each candidate lowercased as runes — the fuzzy
+	// match's working form — so a keystroke's re-rank over 10k+
+	// candidates never re-lowers or re-decodes a Field Path it already
+	// holds. Built alongside candidates in withCandidates.
+	lowered [][]rune
+
+	// runeCounts memoizes each candidate's rune length, the ranking's
+	// shorter-Field-Path tiebreak, keyed like candidates.
+	runeCounts []int
+
 	// filter is the active type-to-filter query.
 	filter string
+
+	// matched memoizes the ranked matches for the active filter: the
+	// re-rank over the whole candidate set runs once per filter change
+	// (rerank), and every reader — the view's window, the selection, the
+	// Session's accessors — shares this one ranking.
+	matched []SearchMatch
 
 	// cursor is the highlighted row's index into matches(); offset
 	// scrolls the match list so the highlighted row stays visible.
@@ -134,11 +151,34 @@ func (s fieldSearch) paste(content string) fieldSearch {
 	return s.resetToTop()
 }
 
-// resetToTop re-anchors the selection after the filter changes: the best
-// vantage over a new ranking is its first row.
+// withCandidates installs the enumerated candidate set and its memoized
+// working forms — lowered runes for matching, rune counts for ranking —
+// then ranks the fresh set once under the active filter.
+func (s fieldSearch) withCandidates(candidates []string) fieldSearch {
+	s.candidates = candidates
+	s.lowered = make([][]rune, len(candidates))
+	s.runeCounts = make([]int, len(candidates))
+	for index, candidate := range candidates {
+		s.lowered[index] = []rune(strings.ToLower(candidate))
+		s.runeCounts[index] = utf8.RuneCountInString(candidate)
+	}
+	return s.rerank()
+}
+
+// resetToTop re-anchors the selection after the filter changes — the best
+// vantage over a new ranking is its first row — and re-ranks the
+// candidates once for every reader of the new filter.
 func (s fieldSearch) resetToTop() fieldSearch {
 	s.cursor = 0
 	s.offset = 0
+	return s.rerank()
+}
+
+// rerank recomputes the memoized ranking for the active filter. Every
+// filter change funnels through here (resetToTop) and every candidate-set
+// change through withCandidates, so matches() stays a plain read.
+func (s fieldSearch) rerank() fieldSearch {
+	s.matched = s.computeMatches()
 	return s
 }
 
@@ -179,11 +219,29 @@ func (s fieldSearch) visibleRows(count int) int {
 	return s.height
 }
 
-// matches narrows the candidates to the active filter and ranks them:
-// tighter matches first (the smallest matched span), shorter Field Paths
-// breaking ties, tree order breaking those. An empty filter lists every
-// candidate in tree order.
+// matches is the ranked match list for the active filter: tighter matches
+// first (the smallest matched span), shorter Field Paths breaking ties,
+// tree order breaking those. An empty filter lists every candidate in tree
+// order. The ranking is memoized — rerank recomputes it on every filter or
+// candidate change — so the readers a single keystroke fans out to (the
+// view, the selection, the Session's accessors) share one re-rank.
 func (s fieldSearch) matches() []SearchMatch {
+	return s.matched
+}
+
+// rankedMatch pairs one match with its precomputed ranking keys, so the
+// sort never re-measures a Field Path per comparison.
+type rankedMatch struct {
+	match   SearchMatch
+	span    int
+	runeLen int
+}
+
+// computeMatches narrows the candidates to the active filter and ranks
+// them. The scan works over the memoized lowered runes with one shared
+// scratch buffer, so the only per-candidate allocation left is the matched
+// positions a surviving match keeps.
+func (s fieldSearch) computeMatches() []SearchMatch {
 	if s.filter == "" {
 		all := make([]SearchMatch, 0, len(s.candidates))
 		for _, candidate := range s.candidates {
@@ -192,13 +250,27 @@ func (s fieldSearch) matches() []SearchMatch {
 		return all
 	}
 
-	var matched []SearchMatch
-	for _, candidate := range s.candidates {
-		if positions, ok := fuzzyMatchPositions(s.filter, candidate); ok {
-			matched = append(matched, SearchMatch{FieldPath: candidate, Matched: positions})
+	wanted := []rune(strings.ToLower(s.filter))
+	scratch := make([]int, 0, len(wanted))
+	var ranked []rankedMatch
+	for index, candidate := range s.candidates {
+		positions, ok := fuzzySubsequence(wanted, s.lowered[index], scratch)
+		if !ok {
+			continue
 		}
+		match := SearchMatch{FieldPath: candidate, Matched: slices.Clone(positions)}
+		ranked = append(ranked, rankedMatch{
+			match:   match,
+			span:    matchSpan(match),
+			runeLen: s.runeCounts[index],
+		})
 	}
-	slices.SortStableFunc(matched, compareMatches)
+	slices.SortStableFunc(ranked, compareRanked)
+
+	matched := make([]SearchMatch, len(ranked))
+	for index, entry := range ranked {
+		matched[index] = entry.match
+	}
 	return matched
 }
 
@@ -211,12 +283,12 @@ func (s fieldSearch) highlighted() (SearchMatch, bool) {
 	return matched[min(s.cursor, len(matched)-1)], true
 }
 
-// compareMatches ranks two matches: the tighter span wins, then the shorter
+// compareRanked ranks two matches: the tighter span wins, then the shorter
 // Field Path; a full tie keeps tree order (the sort is stable).
-func compareMatches(a, b SearchMatch) int {
+func compareRanked(a, b rankedMatch) int {
 	return cmp.Or(
-		cmp.Compare(matchSpan(a), matchSpan(b)),
-		cmp.Compare(len([]rune(a.FieldPath)), len([]rune(b.FieldPath))),
+		cmp.Compare(a.span, b.span),
+		cmp.Compare(a.runeLen, b.runeLen),
 	)
 }
 
@@ -229,20 +301,20 @@ func matchSpan(match SearchMatch) int {
 	return match.Matched[len(match.Matched)-1] - match.Matched[0] + 1
 }
 
-// fuzzyMatchPositions is the fzf-style subsequence match with positions:
-// every filter rune appears in the candidate in order, case-insensitively.
-// The forward scan proves the match; the backward pass then pulls each
-// matched rune as far right as its successor allows, tightening the span so
-// ranking and highlighting reflect the closest grouping the match admits at
-// its earliest end.
-func fuzzyMatchPositions(filter, candidate string) ([]int, bool) {
-	wanted := []rune(strings.ToLower(filter))
+// fuzzySubsequence is the fzf-style subsequence match with positions:
+// every filter rune appears in the candidate in order, case-insensitively —
+// both sides arrive pre-lowered as runes. The forward scan proves the
+// match; the backward pass then pulls each matched rune as far right as its
+// successor allows, tightening the span so ranking and highlighting reflect
+// the closest grouping the match admits at its earliest end. The positions
+// land in the caller's scratch buffer — cloned only for a match that
+// survives — so a 10k-candidate re-rank costs no allocation per miss.
+func fuzzySubsequence(wanted, runes []rune, scratch []int) ([]int, bool) {
 	if len(wanted) == 0 {
 		return nil, true
 	}
-	runes := []rune(strings.ToLower(candidate))
 
-	positions := make([]int, 0, len(wanted))
+	positions := scratch[:0]
 	for index, r := range runes {
 		if len(positions) < len(wanted) && r == wanted[len(positions)] {
 			positions = append(positions, index)
@@ -264,6 +336,10 @@ func fuzzyMatchPositions(filter, candidate string) ([]int, bool) {
 
 // view renders the overlay: the scope-labelled filter prompt and the
 // visible window of ranked matches, the filter's runes highlighted on each.
+// One frame renders each distinct matched rune through the highlight style
+// exactly once — the styled map memoizes the styled form across every row,
+// because lipgloss's per-Render cost across thousands of unbounded rows is
+// exactly what a keystroke's budget cannot afford.
 func (s fieldSearch) view() string {
 	lines := []string{"search " + s.scope.label() + " > " + s.filter}
 
@@ -273,41 +349,67 @@ func (s fieldSearch) view() string {
 		return strings.Join(lines, "\n")
 	}
 
+	styled := make(map[rune]string)
 	visible := s.visibleRows(len(matched))
 	for index := s.offset; index < min(s.offset+visible, len(matched)); index++ {
-		lines = append(lines, s.renderMatch(matched[index], index == s.cursor))
+		lines = append(lines, s.renderMatch(matched[index], index == s.cursor, styled))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // renderMatch renders one overlay row: the selection cursor and the Field
 // Path with the filter's matched runes highlighted.
-func (fieldSearch) renderMatch(match SearchMatch, selected bool) string {
+func (fieldSearch) renderMatch(match SearchMatch, selected bool, styled map[rune]string) string {
 	cursor := "  "
 	if selected {
 		cursor = "> "
 	}
-	return cursor + highlightMatched(match)
+	return cursor + highlightMatched(match, styled)
 }
 
 // highlightMatched renders a match's Field Path with its matched runes in
-// the highlight style — the "why did this row match" cue.
-func highlightMatched(match SearchMatch) string {
+// the highlight style — the "why did this row match" cue. The styled map
+// memoizes each rune's styled form for the frame, and the scan walks the
+// Field Path's runes in place rather than decoding them into a slice. The
+// map assumes one style per matched rune per frame: a styling layer that
+// varies the highlight per row or per position must re-key or drop it.
+func highlightMatched(match SearchMatch, styled map[rune]string) string {
 	if len(match.Matched) == 0 {
 		return match.FieldPath
 	}
 
 	var view strings.Builder
 	next := 0
-	for index, r := range []rune(match.FieldPath) {
+	index := 0
+	for _, r := range match.FieldPath {
 		if next < len(match.Matched) && match.Matched[next] == index {
-			view.WriteString(highlightedStyle.Render(string(r)))
+			rendered, ok := styled[r]
+			if !ok {
+				rendered = highlightedStyle.Render(string(r))
+				styled[r] = rendered
+			}
+			view.WriteString(rendered)
 			next++
-			continue
+		} else {
+			view.WriteRune(r)
 		}
-		view.WriteRune(r)
+		index++
 	}
 	return view.String()
+}
+
+// ensureCandidates enumerates the open Kind's schema-level Field Paths on
+// first use — the candidate set is the Kind's whole Type Schema, memoized
+// per compose view — and installs them through withCandidates, the only
+// door to the search's candidate set: a raw write would leave the memoized
+// working forms (lowered runes, rune counts, the ranking) behind. Every
+// consumer funnels through here — the `/` overlay's first open, a deep
+// link's existence check, and the version switch's landing.
+func (c compose) ensureCandidates() compose {
+	if c.search.candidates == nil {
+		c.search = c.search.withCandidates(c.root.node.FieldPaths())
+	}
+	return c
 }
 
 // landDeepLink applies the launch arg's Field Path over a freshly opened
@@ -318,9 +420,7 @@ func highlightMatched(match SearchMatch) string {
 // existence check runs over the same candidate set the `/` search
 // enumerates, which stays memoized for the overlay's first open.
 func (c compose) landDeepLink(fieldPath string) compose {
-	if c.search.candidates == nil {
-		c.search.candidates = c.root.node.FieldPaths()
-	}
+	c = c.ensureCandidates()
 
 	if !slices.Contains(c.search.candidates, fieldPath) {
 		c.notice = "no Field Path " + fieldPath + " in " + kindDisplayName(c.kind) +
