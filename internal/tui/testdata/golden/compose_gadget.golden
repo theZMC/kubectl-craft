@@ -6,8 +6,8 @@ craft.example.com/v1 Gadget › spec.nickname
     ▾ spec                                  minLength: 1
         efficiency                          maxLength: 63
       ▸ gears
-        maxReplicas ✱                     Human-friendly gadget nickname, DNS-label style.
-        maxUnavailable
+        maxReplicas ✱                     documentation
+        maxUnavailable                    Human-friendly gadget nickname, DNS-label style.
         minReplicas ✱
 >       nickname: ratchet
         profile: balanced

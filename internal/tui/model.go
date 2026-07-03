@@ -500,7 +500,8 @@ func (m Model) render() string {
 
 // transitView renders the loading and error states: the awaited Kind as the
 // breadcrumb — Structure, like every breadcrumb — the state's message, and
-// the contextual hint bar; a version switch's loading state hints at
+// the contextual hint bar, riding the same full-width chrome bar the
+// compose view's footer does; a version switch's loading state hints at
 // cancelling instead of quitting.
 func (m Model) transitView(body string) string {
 	hints := transitHints
@@ -510,9 +511,10 @@ func (m Model) transitView(body string) string {
 	if m.view == validatingDraft {
 		hints = validateTransitHints
 	}
+	bar := m.theme.Bar()
 	return clipLine(m.theme.Structure().Render(kindDisplayName(m.transitKind())), m.width) + "\n\n" +
 		clipLine(body, m.width) + "\n\n" +
-		clipLine(m.theme.Meta().Render(hints), m.width) + "\n"
+		chromeLine(bar.Meta().Render(hints), bar.Chrome(), m.width) + "\n"
 }
 
 // transitKind is the Kind a loading or error state is about: the version

@@ -156,6 +156,17 @@ substrate; composing is the product. The tool never mutates the cluster
   token to the Meta treatment: when a floating overlay dims the view beneath it,
   that dimmed backdrop carries no meaning of its own.
 
+- **Chrome is attribute-only** — the compose view's bottom status line and hint
+  bar (and the transit states' hint line) render as a full-width reverse-video
+  bar through the theme's **`Bar()` variant**: every token keeps its meaning on
+  the bar and gains the bar's reverse treatment, hint text stays Meta, and the
+  bar's own surface (`Chrome()`) carries no hue — the frame's anchor never grows
+  a sixth meaning. The detail pane reads as sections under theme-tokened
+  headers: the field name and the `type:` and `documentation` headers are titles
+  the eye navigates the pane by, so they ride Structure; the findings region's
+  header is a Validate finding's, so it keeps NeedsFixing. A tree/detail pane
+  separator was considered and deliberately dropped.
+
 ## Compose lifecycle
 
 - A Session composes **one Manifest at a time**; returning to the Kind picker

@@ -103,6 +103,38 @@ var _ = Describe("the theme layer", func() {
 		})
 	})
 
+	When("the theme resolves the chrome bar variant", func() {
+		It("adds the bar's reverse treatment to every token, meanings intact", func() {
+			bar := tui.ThemeOf(newShell()).Bar()
+
+			for name, style := range tokenStyles(bar) {
+				Expect(style.GetReverse()).To(BeTrue(), "%s must ride the chrome bar's reverse treatment", name)
+			}
+			expectColoredTokens(bar, "#e06c75", "#98c379", "#e5c07b", "#61afef")
+		})
+
+		It("keeps hint text on the Meta treatment", func() {
+			meta := tui.ThemeOf(newShell()).Bar().Meta()
+
+			Expect(meta.GetFaint()).To(BeTrue(), "hints stay Meta on the bar")
+			Expect(meta.GetForeground()).To(Equal(lipgloss.NoColor{}))
+		})
+
+		It("renders the bar's own surface as attribute-only chrome — no hue, so no sixth meaning", func() {
+			chrome := tui.ThemeOf(newShell()).Bar().Chrome()
+
+			Expect(chrome.GetReverse()).To(BeTrue())
+			Expect(chrome.GetForeground()).To(Equal(lipgloss.NoColor{}), "chrome owns no hue (ADR-0007)")
+			Expect(chrome.GetFaint()).To(BeFalse(), "the bar's surface never dims what rides it")
+			Expect(chrome.GetBold()).To(BeFalse())
+		})
+
+		It("carries no chrome off the bar", func() {
+			Expect(tui.ThemeOf(newShell()).Chrome().GetReverse()).To(BeFalse(),
+				"chrome exists only where the bar does")
+		})
+	})
+
 	When("the queried background answers while a view is open", func() {
 		It("re-paints the open compose view without changing a single glyph", func() {
 			dark := composeDeployment()

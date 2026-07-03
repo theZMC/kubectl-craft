@@ -1493,43 +1493,84 @@ func (c compose) breadcrumb() string {
 // view renders the compose view: breadcrumb, tree + detail panes (or the
 // help overlay), the completeness status line, and the footer line. The
 // breadcrumb is what the eye navigates by, so it carries the Structure
-// token (ADR-0007).
+// token (ADR-0007); the status line and footer ride the full-width chrome
+// bar, whose styles resolve once per frame.
 func (c compose) view() string {
+	bar := c.barStyles()
 	return clipLine(c.theme.Structure().Render(c.breadcrumb()), c.width) + "\n" +
 		c.bodyView() + "\n" +
-		clipLine(c.statusLine(), c.width) + "\n" +
-		clipLine(c.footer(), c.width) + "\n"
+		chromeLine(c.statusLine(bar), bar.chrome, c.width) + "\n" +
+		chromeLine(c.footer(bar), bar.chrome, c.width) + "\n"
+}
+
+// barStyles is the chrome bar's slice of the palette — the bottom status
+// line and hint bar's tokens on the Bar variant, plus the bar's own
+// surface — resolved once per frame like the tree pane's bundle: the
+// full-width fill renders through the one chrome style, never per cell.
+type barStyles struct {
+	chrome      lipgloss.Style
+	meta        lipgloss.Style
+	set         lipgloss.Style
+	needsFixing lipgloss.Style
+	ask         lipgloss.Style
+}
+
+// barStyles resolves the chrome bar's tokens for one frame.
+func (c compose) barStyles() barStyles {
+	bar := c.theme.Bar()
+	return barStyles{
+		chrome:      bar.Chrome(),
+		meta:        bar.Meta(),
+		set:         bar.Set(),
+		needsFixing: bar.NeedsFixing(),
+		ask:         bar.Ask(),
+	}
+}
+
+// chromeLine stretches one rendered bar line into the full-width chrome
+// bar: the bar's own fill pads the remainder in a single render — no
+// per-cell work — and the result clips ANSI-safely like every frame line.
+// Zero width (no tea.WindowSizeMsg yet) adds no fill.
+func chromeLine(content string, chrome lipgloss.Style, width int) string {
+	if width > 0 {
+		if fill := width - lipgloss.Width(content); fill > 0 {
+			content += chrome.Render(strings.Repeat(" ", fill))
+		}
+	}
+	return clipLine(content, width)
 }
 
 // statusLine is the persistent status line: the completeness segment
 // (DESIGN.md — Flow §3: a status line tracks completeness), the
 // required-to-Validate metadata flag — distinct from the schema-required
-// count, and shown from session start — and the last Validate's state.
-func (c compose) statusLine() string {
-	segments := []string{c.completenessSegment()}
-	if gate := c.validateGateSegment(); gate != "" {
+// count, and shown from session start — and the last Validate's state. The
+// gaps between segments are the bar's own surface, so the line reads as one
+// bar.
+func (c compose) statusLine(bar barStyles) string {
+	segments := []string{c.completenessSegment(bar)}
+	if gate := c.validateGateSegment(bar); gate != "" {
 		segments = append(segments, gate)
 	}
-	if state := c.validateStateSegment(); state != "" {
+	if state := c.validateStateSegment(bar); state != "" {
 		segments = append(segments, state)
 	}
-	return strings.Join(segments, "   ")
+	return strings.Join(segments, bar.chrome.Render("   "))
 }
 
 // completenessSegment is the schema-required half of the status line: how
 // many required fields the Draft is still missing — what blocks, so
 // NeedsFixing — or the ✔ all-clear once none are, which is Set: filled and
 // well (ADR-0007).
-func (c compose) completenessSegment() string {
+func (c compose) completenessSegment(bar barStyles) string {
 	count := len(c.missing)
 	if count == 0 {
-		return c.theme.Set().Render("✔ no required fields missing")
+		return bar.set.Render("✔ no required fields missing")
 	}
 	noun := "fields"
 	if count == 1 {
 		noun = "field"
 	}
-	return c.theme.NeedsFixing().Render(fmt.Sprintf("%s %d required %s missing", requiredMarker, count, noun))
+	return bar.needsFixing.Render(fmt.Sprintf("%s %d required %s missing", requiredMarker, count, noun))
 }
 
 // footer is the view's bottom line: an open confirm — the destructive
@@ -1538,25 +1579,26 @@ func (c compose) completenessSegment() string {
 // awaits a decision, so they carry the Ask token; the hint bar stays Meta.
 // A notice carries no token at all: notices span meanings — failures and
 // guidance alike — so no single color can claim them without breaking
-// one-color-per-meaning (ADR-0007), and default foreground on the line the
-// faint Meta hints usually hold already stands out.
-func (c compose) footer() string {
+// one-color-per-meaning (ADR-0007), and undimmed text on the line the
+// faint Meta hints usually hold already stands out. The bar's reverse
+// under the notice is the chrome's, never the notice's own paint.
+func (c compose) footer(bar barStyles) string {
 	if c.unset != nil {
-		return c.theme.Ask().Render(c.unset.prompt())
+		return bar.ask.Render(c.unset.prompt())
 	}
 	if c.gate != nil {
-		return c.theme.Ask().Render(c.gate.prompt())
+		return bar.ask.Render(c.gate.prompt())
 	}
 	if c.pendingSwitch != nil {
-		return c.theme.Ask().Render(c.pendingSwitch.prompt())
+		return bar.ask.Render(c.pendingSwitch.prompt())
 	}
 	if c.discardToPicker {
-		return c.theme.Ask().Render(discardToPickerPrompt)
+		return bar.ask.Render(discardToPickerPrompt)
 	}
 	if c.notice != "" {
-		return c.notice
+		return bar.chrome.Render(c.notice)
 	}
-	return c.theme.Meta().Render(c.hints())
+	return bar.meta.Render(c.hints())
 }
 
 // hints is the contextual one-line hint bar: the open value widget's own
@@ -1842,14 +1884,19 @@ func (c compose) graftDetailLines(row *treeRow) []string {
 	return append(lines, graftLines(value.Data)...)
 }
 
-// metadataLines renders one node's Metadata() for the detail pane: display
-// type, requiredness — the required-but-unset flag carrying NeedsFixing,
-// the same meaning the tree marker paints — the schema default as a dimmed
-// Meta placeholder (DESIGN.md — Flow §6: defaults render dimmed, never in
-// the output), enum values, constraints (CEL text included), the
-// schema-blind note, and the field's documentation.
+// metadataLines renders one node's Metadata() for the detail pane, its
+// regions under theme-tokened section headers so the pane reads as sections
+// (field name / type / documentation — a Validate finding's region heads
+// itself in findingDetailLines): the field name and the `type:` and
+// `documentation` headers are titles the eye navigates the pane by, so they
+// ride Structure (ADR-0007). Under the type header sit the schema facts:
+// requiredness — the required-but-unset flag carrying NeedsFixing, the same
+// meaning the tree marker paints — the schema default as a dimmed Meta
+// placeholder (DESIGN.md — Flow §6: defaults render dimmed, never in the
+// output), enum values, constraints (CEL text included), and the
+// schema-blind note.
 func metadataLines(row *treeRow, meta schema.Metadata, missingRequired bool, th theme) []string {
-	lines := []string{th.Structure().Render(row.label), "type: " + meta.Type}
+	lines := []string{th.Structure().Render(row.label), th.Structure().Render("type:") + " " + meta.Type}
 
 	if meta.Required {
 		flag := "required"
@@ -1874,7 +1921,7 @@ func metadataLines(row *treeRow, meta schema.Metadata, missingRequired bool, th 
 		lines = append(lines, "", schemaBlindNote)
 	}
 	if meta.Description != "" {
-		lines = append(lines, "", meta.Description)
+		lines = append(lines, "", th.Structure().Render("documentation"), meta.Description)
 	}
 	return lines
 }

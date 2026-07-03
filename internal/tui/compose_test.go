@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -546,6 +548,8 @@ var _ = Describe("the compose view", func() {
 				"the schema default renders as a dimmed placeholder, never as a value in the Draft")
 			Expect(view).To(ContainSubstring("rule: self in ['economy', 'balanced', 'performance']"),
 				"CEL rules render as constraint text; evaluation stays server-side")
+			Expect(view).To(ContainSubstring("documentation"),
+				"the field's documentation sits under its own section header")
 			Expect(view).To(ContainSubstring("Named performance profile for the gadget."))
 		})
 
@@ -654,6 +658,17 @@ var _ = Describe("the compose view", func() {
 				"the hint bar documents the direct emit-&-quit shortcut")
 			Expect(view).To(ContainSubstring("esc Kind picker"),
 				"the hint bar documents the key returning to the picker")
+		})
+
+		It("stretches the status line and hint bar into the full-width chrome bar", func() {
+			model, _ := press(composeDeployment(), tea.WindowSizeMsg{Width: 100, Height: 30})
+
+			lines := strings.Split(strings.TrimRight(render(model), "\n"), "\n")
+			Expect(len(lines)).To(BeNumerically(">=", 2))
+			Expect(ansi.StringWidth(lines[len(lines)-2])).To(Equal(100),
+				"the completeness status line fills the chrome bar's whole width")
+			Expect(ansi.StringWidth(lines[len(lines)-1])).To(Equal(100),
+				"the hint bar fills the chrome bar's whole width")
 		})
 
 		It("returns to the Kind picker on Esc, keeping the picker browsable", func() {

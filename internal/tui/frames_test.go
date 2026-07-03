@@ -1,9 +1,9 @@
 package tui_test
 
 import (
-	"bytes"
 	"context"
 	"image/color"
+	"io"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/teatest/v2"
+	"github.com/charmbracelet/x/vt"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -40,6 +41,47 @@ const (
 	frameTimeout = 10 * time.Second
 )
 
+// goldenSession pairs the running golden program with a virtual terminal
+// fed by everything the program has written so far. Bubble Tea v2's diff
+// renderer writes partial-line updates — cursor jumps can split any awaited
+// substring across writes — so the raw byte stream is not scannable: the
+// quiescence gates read the emulated screen instead, where every fragment
+// has landed at its real position.
+type goldenSession struct {
+	*teatest.TestModel
+
+	// output is the one incremental reader over the program's output;
+	// screen accumulates everything it has ever written.
+	output io.Reader
+	screen *vt.Emulator
+}
+
+// newGoldenSession wraps a started teatest program in the virtual terminal
+// its quiescence gates read. The emulator answers terminal queries — the
+// shell's Init-time background query among them — into its response pipe,
+// and those synchronous writes block the parse until something reads them:
+// a drain goroutine discards the responses (the program under test takes
+// its input from teatest, never from here), and the spec's cleanup closes
+// the pipe so the drain ends with the spec.
+func newGoldenSession(session *teatest.TestModel) *goldenSession {
+	screen := vt.NewEmulator(goldenWidth, goldenHeight)
+	go func() { _, _ = io.Copy(io.Discard, screen) }()
+	DeferCleanup(screen.Close)
+
+	return &goldenSession{
+		TestModel: session,
+		output:    session.Output(),
+		screen:    screen,
+	}
+}
+
+// screenText drains the program's newly written bytes into the virtual
+// terminal and returns the visible screen as plain text.
+func (s *goldenSession) screenText() string {
+	_, _ = io.Copy(s.screen, s.output)
+	return s.screen.String()
+}
+
 // startGoldenSession runs the Session shell as a real tea.Program on
 // teatest's in-memory terminal at the pinned frame size, over the same
 // fixture corpus the state-first specs use. teatest builds the program on
@@ -48,25 +90,25 @@ const (
 // environment, so CI and a local terminal could pin different bytes; NoTTY
 // is lipgloss v2's spelling of v1's suite-wide Ascii profile, stripping
 // every style from the program's output before any sentinel is scanned.
-func startGoldenSession(link *tui.DeepLink) *teatest.TestModel {
+func startGoldenSession(link *tui.DeepLink) *goldenSession {
 	GinkgoHelper()
 	shell := tui.New(context.Background(), browsableKinds(), corpusFetcher(), corpusIndex(),
 		&stubValidator{outcome: data.Clean{}}, "", link)
-	return teatest.NewTestModel(GinkgoTB(), shell,
+	return newGoldenSession(teatest.NewTestModel(GinkgoTB(), shell,
 		teatest.WithInitialTermSize(goldenWidth, goldenHeight),
-		teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.NoTTY)))
+		teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.NoTTY))))
 }
 
-// awaitRender blocks until the program's output carries the sentinel: the
+// awaitRender blocks until the emulated screen shows the sentinel: the
 // quiescence gate that drives past loading states — a lazy group-document
 // fetch resolves off the Update loop, so keys sent before its landing
 // would fall into the loading state's grammar instead of the view the
-// frame pins.
-func awaitRender(session *teatest.TestModel, sentinel string) {
+// frame pins. The gate polls the screen, never the raw stream (an async
+// wait, so it goes through Eventually — the house rule).
+func awaitRender(session *goldenSession, sentinel string) {
 	GinkgoHelper()
-	teatest.WaitFor(GinkgoTB(), session.Output(), func(rendered []byte) bool {
-		return bytes.Contains(rendered, []byte(sentinel))
-	}, teatest.WithDuration(frameTimeout))
+	Eventually(session.screenText).WithTimeout(frameTimeout).
+		Should(ContainSubstring(sentinel), "the frame never quiesced on the sentinel")
 }
 
 // finalFrame ends the Session and renders the final frame from the final
@@ -76,7 +118,7 @@ func awaitRender(session *teatest.TestModel, sentinel string) {
 // always emit ANSI — downsampling moved to the program's output layer —
 // so the harness strips the styling here, exactly what the v1 suite's
 // Ascii profile did before any spec rendered anything.
-func finalFrame(session *teatest.TestModel) string {
+func finalFrame(session *goldenSession) string {
 	GinkgoHelper()
 	Expect(session.Quit()).To(Succeed())
 	shell, isShell := session.FinalModel(GinkgoTB(), teatest.WithFinalTimeout(frameTimeout)).(tui.Model)
@@ -91,7 +133,7 @@ func finalFrame(session *teatest.TestModel) string {
 // as (the ThemeOf seam's discipline), so dark and light pin deterministic
 // bytes. The Validator answers Invalid with one finding on spec.nickname, so
 // the mixed-state frame carries a mapped Validate marker.
-func startColoredSession(background color.Color) *teatest.TestModel {
+func startColoredSession(background color.Color) *goldenSession {
 	GinkgoHelper()
 	invalid := data.Invalid{Status: statusWithCause("spec.nickname",
 		"Invalid value: \"ratchet\": nickname is already taken")}
@@ -101,7 +143,7 @@ func startColoredSession(background color.Color) *teatest.TestModel {
 		teatest.WithInitialTermSize(goldenWidth, goldenHeight),
 		teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
 	session.Send(tea.BackgroundColorMsg{Color: background})
-	return session
+	return newGoldenSession(session)
 }
 
 // composeMixedState drives the colored Session to the one mixed-state frame
@@ -114,7 +156,7 @@ func startColoredSession(background color.Color) *teatest.TestModel {
 // confirm pins, and it renders unpainted by design. The awaits gate only
 // the async boundaries — the lazy fetch and the dry-run flight; every key
 // in between transitions synchronously in Update.
-func composeMixedState(session *teatest.TestModel) {
+func composeMixedState(session *goldenSession) {
 	GinkgoHelper()
 	awaitRender(session, "apiVersion") // the deep link's fetch has landed on the compose view
 
@@ -150,7 +192,7 @@ func composeMixedState(session *teatest.TestModel) {
 // styling: the colored goldens pin the escape sequences themselves, so a
 // wrong token mapping — a set value rendering in the error color — fails
 // mechanically instead of shipping silently.
-func finalColoredFrame(session *teatest.TestModel) string {
+func finalColoredFrame(session *goldenSession) string {
 	GinkgoHelper()
 	Expect(session.Quit()).To(Succeed())
 	shell, isShell := session.FinalModel(GinkgoTB(), teatest.WithFinalTimeout(frameTimeout)).(tui.Model)
@@ -160,7 +202,7 @@ func finalColoredFrame(session *teatest.TestModel) string {
 
 // searchLand lands the focus on a Field Path through the / field-search
 // overlay — the deterministic way to reach a node without counting rows.
-func searchLand(session *teatest.TestModel, query string) {
+func searchLand(session *goldenSession, query string) {
 	session.Send(keyRune('/'))
 	session.Type(query)
 	session.Send(enterKey)
@@ -168,7 +210,7 @@ func searchLand(session *teatest.TestModel, query string) {
 
 // confirmFocusedLeaf opens the focused leaf's value widget, types the
 // value, and confirms it into the Draft.
-func confirmFocusedLeaf(session *teatest.TestModel, value string) {
+func confirmFocusedLeaf(session *goldenSession, value string) {
 	session.Send(enterKey)
 	session.Type(value)
 	session.Send(enterKey)

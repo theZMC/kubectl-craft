@@ -140,7 +140,11 @@ loop) at a fixed **100×30** and with the color profile forced to Ascii, so CI
 and a local terminal pin identical bytes. The frames are normalized before
 comparing or writing: trailing whitespace is stripped from every line (the panes
 pad lines to their widths) and each frame ends with exactly one newline, which
-keeps the checked-in goldens out of the pre-commit fixer hooks' way.
+keeps the checked-in goldens out of the pre-commit fixer hooks' way. The specs'
+quiescence gates read a virtual-terminal emulation of the program's output
+(`charmbracelet/x/vt`), never the raw byte stream: Bubble Tea v2's diff renderer
+writes partial-line updates, so a raw-substring scan can miss a sentinel that
+the screen plainly shows.
 
 Alongside the Ascii set live the **colored goldens**
 (`compose_mixed_truecolor_{dark,light}.golden`): one mixed-state compose frame —

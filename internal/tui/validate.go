@@ -447,12 +447,12 @@ func (c compose) findingDetailLines(row *treeRow) []string {
 // spelled apart from the schema-required count (DESIGN.md — Output). It is
 // the gate's flag — what awaits the user's answer — so it carries Ask, the
 // same token the gate prompt itself renders through.
-func (c compose) validateGateSegment() string {
+func (c compose) validateGateSegment(bar barStyles) string {
 	missing := c.missingValidateMetadata()
 	if len(missing) == 0 {
 		return ""
 	}
-	return c.theme.Ask().Render("Validate needs " + strings.Join(missing, " and "))
+	return bar.ask.Render("Validate needs " + strings.Join(missing, " and "))
 }
 
 // validateStateSegment is the status line's Validate half: the clean
@@ -460,18 +460,18 @@ func (c compose) validateGateSegment() string {
 // NeedsFixing, flagged stale once the Draft has mutated past it.
 // Unavailability renders in the results pane instead, never as manifest
 // state.
-func (c compose) validateStateSegment() string {
+func (c compose) validateStateSegment(bar barStyles) string {
 	state := c.validation
 	switch {
 	case state == nil, state.unavailable != "":
 		return ""
 	case state.clean:
-		return c.theme.Set().Render("✔ Validate passed")
+		return bar.set.Render("✔ Validate passed")
 	case state.stale:
-		return c.theme.NeedsFixing().Render(fmt.Sprintf("%s %d Validate %s — stale, v revalidates",
+		return bar.needsFixing.Render(fmt.Sprintf("%s %d Validate %s — stale, v revalidates",
 			findingMarker, state.findingCount(), findingNoun(state.findingCount())))
 	default:
-		return c.theme.NeedsFixing().Render(fmt.Sprintf("%s %d Validate %s",
+		return bar.needsFixing.Render(fmt.Sprintf("%s %d Validate %s",
 			findingMarker, state.findingCount(), findingNoun(state.findingCount())))
 	}
 }

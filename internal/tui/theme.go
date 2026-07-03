@@ -63,6 +63,10 @@ type theme struct {
 
 	// muted folds every token into the Meta treatment — the Muted variant.
 	muted bool
+
+	// bar adds the chrome bar's reverse-video treatment to every token —
+	// the Bar variant.
+	bar bool
 }
 
 // withBackground re-resolves the palette against the queried terminal
@@ -78,6 +82,27 @@ func (t theme) withBackground(isDark bool) theme {
 func (t theme) Muted() theme {
 	t.muted = true
 	return t
+}
+
+// Bar is the chrome variant the frame's bottom status line and hint bar
+// consume: every token keeps its meaning and gains the bar's reverse-video
+// treatment, so the two lines read as one full-width bar anchoring the
+// frame. The chrome is attribute-only — reverse video, no hue of its own —
+// so the bar never grows a sixth meaning (ADR-0007).
+func (t theme) Bar() theme {
+	t.bar = true
+	return t
+}
+
+// Chrome styles the bar's own surface — the full-width fill and any
+// tokenless text riding it (a notice keeps carrying no token: the reverse
+// belongs to the bar, never to the notice's words). Off the Bar variant it
+// is the unstyled default, because chrome exists only where the bar does.
+func (t theme) Chrome() lipgloss.Style {
+	if !t.bar {
+		return lipgloss.NewStyle()
+	}
+	return lipgloss.NewStyle().Reverse(true)
 }
 
 // NeedsFixing styles what blocks or rejects — the missing-required marker,
@@ -104,14 +129,17 @@ func (t theme) Meta() lipgloss.Style { return t.style(tokenMeta) }
 // style is the palette's single resolution point — every render site's
 // style arrives from here through the token accessors. The Muted variant
 // folds every token into the Meta treatment; Meta renders neutral faint;
-// every other token picks its pair against the queried background.
+// every other token picks its pair against the queried background; the Bar
+// variant adds the chrome bar's reverse on top of whatever the token
+// resolved to.
 func (t theme) style(tk token) lipgloss.Style {
+	style := t.Chrome()
 	if t.muted || tk == tokenMeta {
-		return lipgloss.NewStyle().Faint(true)
+		return style.Faint(true)
 	}
 
 	pair := tokenPairs[tk]
-	style := lipgloss.NewStyle().Foreground(lipgloss.LightDark(!t.light)(pair.light, pair.dark))
+	style = style.Foreground(lipgloss.LightDark(!t.light)(pair.light, pair.dark))
 	if tk == tokenStructure {
 		style = style.Bold(true)
 	}

@@ -1,6 +1,12 @@
 {
   "version": 1,
   "skills": {
+    "agent-tty": {
+      "source": "coder/agent-tty",
+      "sourceType": "github",
+      "skillPath": "skills/agent-tty/SKILL.md",
+      "computedHash": "56e2fe68cfd80c424ddae258b6a1f79997db490eaca1b1f9a8d557c76be6f2a5"
+    },
     "bubbletea": {
       "source": "ggprompts/tfe",
       "sourceType": "github",
