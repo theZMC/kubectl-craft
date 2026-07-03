@@ -843,9 +843,10 @@ func emitFailureNotice(err error) string {
 // view renders the open exit menu as the body overlay: every ramp on its
 // own line, the highlighted one carrying the cursor — the completeness
 // status line keeps rendering beneath it, so "what would I be emitting" and
-// "how complete is it" coexist.
+// "how complete is it" coexist. The menu awaits a decision, so its question
+// carries Ask; the highlighted ramp is the focus, so it stays Structure.
 func (m exitMenu) view(th theme) string {
-	lines := []string{"quit composing — what happens to the Draft?", ""}
+	lines := []string{th.Ask().Render("quit composing — what happens to the Draft?"), ""}
 	for index, option := range exitOptions {
 		cursor := "  "
 		name := option.name
@@ -1001,7 +1002,8 @@ func (c compose) confirmKeyPrompt() compose {
 	return c
 }
 
-// viewLines renders the open key prompt for the detail pane.
+// viewLines renders the open key prompt for the detail pane; a rejection is
+// what turned the confirm away, so it carries NeedsFixing (ADR-0007).
 func (p keyPrompt) viewLines(th theme) []string {
 	lines := []string{
 		th.Structure().Render(p.label()),
@@ -1010,7 +1012,7 @@ func (p keyPrompt) viewLines(th theme) []string {
 		"> " + p.input + "▏",
 	}
 	if p.rejection != "" {
-		lines = append(lines, "", th.Structure().Render(p.rejection))
+		lines = append(lines, "", th.NeedsFixing().Render(p.rejection))
 	}
 	return lines
 }
@@ -1489,9 +1491,11 @@ func (c compose) breadcrumb() string {
 }
 
 // view renders the compose view: breadcrumb, tree + detail panes (or the
-// help overlay), the completeness status line, and the footer line.
+// help overlay), the completeness status line, and the footer line. The
+// breadcrumb is what the eye navigates by, so it carries the Structure
+// token (ADR-0007).
 func (c compose) view() string {
-	return clipLine(c.breadcrumb(), c.width) + "\n" +
+	return clipLine(c.theme.Structure().Render(c.breadcrumb()), c.width) + "\n" +
 		c.bodyView() + "\n" +
 		clipLine(c.statusLine(), c.width) + "\n" +
 		clipLine(c.footer(), c.width) + "\n"
@@ -1513,38 +1517,44 @@ func (c compose) statusLine() string {
 }
 
 // completenessSegment is the schema-required half of the status line: how
-// many required fields the Draft is still missing, or the complete marker
-// once none are.
+// many required fields the Draft is still missing — what blocks, so
+// NeedsFixing — or the ✔ all-clear once none are, which is Set: filled and
+// well (ADR-0007).
 func (c compose) completenessSegment() string {
 	count := len(c.missing)
 	if count == 0 {
-		return c.theme.Meta().Render("✔ no required fields missing")
+		return c.theme.Set().Render("✔ no required fields missing")
 	}
 	noun := "fields"
 	if count == 1 {
 		noun = "field"
 	}
-	return c.theme.Structure().Render(fmt.Sprintf("%s %d required %s missing", requiredMarker, count, noun))
+	return c.theme.NeedsFixing().Render(fmt.Sprintf("%s %d required %s missing", requiredMarker, count, noun))
 }
 
 // footer is the view's bottom line: an open confirm — the destructive
 // unset's or the Draft discard's — a non-fatal notice until the next key
-// press, the contextual hint bar otherwise.
+// press, the contextual hint bar otherwise. Every confirm and prompt
+// awaits a decision, so they carry the Ask token; the hint bar stays Meta.
+// A notice carries no token at all: notices span meanings — failures and
+// guidance alike — so no single color can claim them without breaking
+// one-color-per-meaning (ADR-0007), and default foreground on the line the
+// faint Meta hints usually hold already stands out.
 func (c compose) footer() string {
 	if c.unset != nil {
-		return c.theme.Structure().Render(c.unset.prompt())
+		return c.theme.Ask().Render(c.unset.prompt())
 	}
 	if c.gate != nil {
-		return c.theme.Structure().Render(c.gate.prompt())
+		return c.theme.Ask().Render(c.gate.prompt())
 	}
 	if c.pendingSwitch != nil {
-		return c.theme.Structure().Render(c.pendingSwitch.prompt())
+		return c.theme.Ask().Render(c.pendingSwitch.prompt())
 	}
 	if c.discardToPicker {
-		return c.theme.Structure().Render(discardToPickerPrompt)
+		return c.theme.Ask().Render(discardToPickerPrompt)
 	}
 	if c.notice != "" {
-		return c.theme.Structure().Render(c.notice)
+		return c.notice
 	}
 	return c.theme.Meta().Render(c.hints())
 }
@@ -1663,26 +1673,50 @@ func clipLines(text string, width int) string {
 	return strings.Join(lines, "\n")
 }
 
-// treePane renders the visible window of tree rows.
+// treeStyles is the tree pane's slice of the palette, resolved once per
+// frame and threaded to every row — the render hot path's invariant: token
+// styles resolve once per frame, never per row (the same discipline the
+// search overlay's per-frame styled cache keeps).
+type treeStyles struct {
+	structure   lipgloss.Style
+	set         lipgloss.Style
+	needsFixing lipgloss.Style
+	meta        lipgloss.Style
+}
+
+// treeStyles resolves the tree pane's tokens for one frame.
+func (c compose) treeStyles() treeStyles {
+	return treeStyles{
+		structure:   c.theme.Structure(),
+		set:         c.theme.Set(),
+		needsFixing: c.theme.NeedsFixing(),
+		meta:        c.theme.Meta(),
+	}
+}
+
+// treePane renders the visible window of tree rows, every row through the
+// one set of styles this frame resolved.
 func (c compose) treePane(width int) string {
 	visible := c.bodyHeight()
 	if visible <= 0 {
 		visible = len(c.rows)
 	}
 
+	styles := c.treeStyles()
 	lines := make([]string, 0, visible)
 	for index := c.offset; index < min(c.offset+visible, len(c.rows)); index++ {
-		lines = append(lines, clipLine(c.renderTreeRow(index), width))
+		lines = append(lines, clipLine(c.renderTreeRow(index, styles), width))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // renderTreeRow renders one tree row: focus cursor, depth indent, a
-// truthful expand indicator (loaded leaves render as leaves), the label,
-// the Draft's state at the node — the being-edited buffer, the set value,
-// or the schema default as a dimmed placeholder — and the
-// required-but-unset marker.
-func (c compose) renderTreeRow(index int) string {
+// truthful expand indicator (loaded leaves render as leaves), the label —
+// the focused row carrying Structure — the Draft's state at the node, and
+// the required-but-unset and Validate finding markers, both NeedsFixing:
+// what blocks and what the server rejected share the one broken-prior hue
+// (ADR-0007).
+func (c compose) renderTreeRow(index int, styles treeStyles) string {
 	row := c.rows[index]
 
 	cursor := "  "
@@ -1700,14 +1734,14 @@ func (c compose) renderTreeRow(index int) string {
 
 	label := row.label
 	if index == c.cursor {
-		label = c.theme.Structure().Render(label)
+		label = styles.structure.Render(label)
 	}
-	label += c.rowValue(row)
+	label += c.rowValue(row, styles)
 	if c.rowMissingRequired(row) {
-		label += " " + requiredMarker
+		label += " " + styles.needsFixing.Render(requiredMarker)
 	}
 	if c.rowHasFindings(row) {
-		label += " " + findingMarker
+		label += " " + styles.needsFixing.Render(findingMarker)
 	}
 
 	return cursor + strings.Repeat("  ", row.depth) + indicator + label
@@ -1716,9 +1750,10 @@ func (c compose) renderTreeRow(index int) string {
 // rowValue is the Draft state a leaf row shows after its label: the open
 // widget's live buffer while the row is being edited, the key prompt's live
 // buffer while the row is prompting, the value the Draft holds once one is
-// set, or the schema default as a dimmed placeholder — visually distinct
-// from a set value, and never in the output (DESIGN.md — Flow §6).
-func (c compose) rowValue(row *treeRow) string {
+// set — filled and well, so the Set token — or the schema default as a
+// dimmed Meta placeholder: visually distinct from a set value, and never in
+// the output (DESIGN.md — Flow §6).
+func (c compose) rowValue(row *treeRow, styles treeStyles) string {
 	if c.editor != nil && c.editor.row == row {
 		return ": " + c.editor.inlineValue()
 	}
@@ -1729,13 +1764,13 @@ func (c compose) rowValue(row *treeRow) string {
 		return ""
 	}
 	if spelled, filled := c.draftRowValue(row); filled {
-		return spelled
+		return ": " + styles.set.Render(spelled)
 	}
 	meta, err := row.node.Metadata()
 	if err != nil || meta.Default == nil {
 		return ""
 	}
-	return c.theme.Meta().Render(": " + renderScalar(meta.Default))
+	return styles.meta.Render(": " + renderScalar(meta.Default))
 }
 
 // draftRowValue spells the value the Draft holds at the row, when one is
@@ -1751,9 +1786,9 @@ func (c compose) draftRowValue(row *treeRow) (string, bool) {
 		return "", false
 	}
 	if value.Type == schema.TypeRawYAML {
-		return ": " + graftSummary(value.Data), true
+		return graftSummary(value.Data), true
 	}
-	return ": " + renderScalar(value.Data), true
+	return renderScalar(value.Data), true
 }
 
 // detailPane renders the focused node's detail: its Metadata() when it
@@ -1803,22 +1838,23 @@ func (c compose) graftDetailLines(row *treeRow) []string {
 	if !filled || value.Type != schema.TypeRawYAML {
 		return nil
 	}
-	lines := []string{"", "grafted: " + graftSummary(value.Data), ""}
+	lines := []string{"", "grafted: " + c.theme.Set().Render(graftSummary(value.Data)), ""}
 	return append(lines, graftLines(value.Data)...)
 }
 
 // metadataLines renders one node's Metadata() for the detail pane: display
-// type, requiredness, the schema default as a dimmed placeholder
-// (DESIGN.md — Flow §6: defaults render dimmed, never in the output), enum
-// values, constraints (CEL text included), the schema-blind note, and the
-// field's documentation.
+// type, requiredness — the required-but-unset flag carrying NeedsFixing,
+// the same meaning the tree marker paints — the schema default as a dimmed
+// Meta placeholder (DESIGN.md — Flow §6: defaults render dimmed, never in
+// the output), enum values, constraints (CEL text included), the
+// schema-blind note, and the field's documentation.
 func metadataLines(row *treeRow, meta schema.Metadata, missingRequired bool, th theme) []string {
 	lines := []string{th.Structure().Render(row.label), "type: " + meta.Type}
 
 	if meta.Required {
 		flag := "required"
 		if missingRequired {
-			flag += " — unset"
+			flag = th.NeedsFixing().Render(flag + " — unset")
 		}
 		lines = append(lines, flag)
 	}

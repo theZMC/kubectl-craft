@@ -1,0 +1,30 @@
+[1;38;2;97;175;239mcraft.example.com/v1 Gadget › spec[m
+  ▾ Gadget                                [1;38;2;97;175;239mspec[m
+      apiVersion                          type: object
+      kind                                constraints:
+    ▾ metadata                              rule: self.minReplicas <= self.maxReplicas — minReplicas
+      ▸ annotations                       must not exceed maxReplicas
+        creationTimestamp
+        deletionGracePeriodSeconds        Desired Gadget behavior.
+        deletionTimestamp
+      ▸ finalizers
+        generateName
+        generation
+      ▸ labels
+      ▸ managedFields
+        name: [38;2;152;195;121mdemo[m
+        namespace
+      ▸ ownerReferences
+        resourceVersion
+        selfLink
+        uid
+>   ▾ [1;38;2;97;175;239mspec[m
+        efficiency
+      ▸ gears
+        maxReplicas [38;2;224;108;117m✱[m
+        maxUnavailable
+        minReplicas [38;2;224;108;117m✱[m
+        nickname: [38;2;152;195;121mratchet[m [38;2;224;108;117m✘[m
+        profile[2m: balanced[m
+[38;2;224;108;117m✱ 2 required fields missing[m   [38;2;229;192;123mValidate needs metadata.namespace[m   [38;2;224;108;117m✘ 1 Validate finding — stale, v re[m
+[38;2;229;192;123mdiscard 1 value under spec? y/enter discard · n/esc keep[m

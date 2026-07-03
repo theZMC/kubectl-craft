@@ -5,6 +5,9 @@
 *.test
 coverage.out
 
+# macOS Finder metadata, wherever it lands
+**/.DS_Store
+
 # goreleaser output (snapshot and release builds)
 /dist/
 

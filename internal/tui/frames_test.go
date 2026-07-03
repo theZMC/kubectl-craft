@@ -3,9 +3,11 @@ package tui_test
 import (
 	"bytes"
 	"context"
+	"image/color"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/teatest/v2"
@@ -82,6 +84,80 @@ func finalFrame(session *teatest.TestModel) string {
 	return ansi.Strip(shell.View().Content)
 }
 
+// startColoredSession runs the Session shell exactly like startGoldenSession
+// but keeps the styling: the color profile pins to TrueColor and the queried
+// terminal background is answered by injecting the given color as a
+// tea.BackgroundColorMsg — the same message a real terminal's answer arrives
+// as (the ThemeOf seam's discipline), so dark and light pin deterministic
+// bytes. The Validator answers Invalid with one finding on spec.nickname, so
+// the mixed-state frame carries a mapped Validate marker.
+func startColoredSession(background color.Color) *teatest.TestModel {
+	GinkgoHelper()
+	invalid := data.Invalid{Status: statusWithCause("spec.nickname",
+		"Invalid value: \"ratchet\": nickname is already taken")}
+	shell := tui.New(context.Background(), browsableKinds(), corpusFetcher(), corpusIndex(),
+		&stubValidator{outcome: invalid}, "", &tui.DeepLink{Kind: kindNamed("Gadget", "v1")})
+	session := teatest.NewTestModel(GinkgoTB(), shell,
+		teatest.WithInitialTermSize(goldenWidth, goldenHeight),
+		teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
+	session.Send(tea.BackgroundColorMsg{Color: background})
+	return session
+}
+
+// composeMixedState drives the colored Session to the one mixed-state frame
+// the colored goldens pin: a set value (Set), missing required markers
+// (NeedsFixing), a mapped Validate finding — stale, still NeedsFixing —
+// the required-to-Validate gate flag (Ask), and a pending unset confirm
+// (Ask) all visible together, under the Structure breadcrumb and focused
+// row with the Meta default placeholders alongside. A notice is
+// deliberately not in the frame: it shares the footer line the pending
+// confirm pins, and it renders unpainted by design. The awaits gate only
+// the async boundaries — the lazy fetch and the dry-run flight; every key
+// in between transitions synchronously in Update.
+func composeMixedState(session *teatest.TestModel) {
+	GinkgoHelper()
+	awaitRender(session, "apiVersion") // the deep link's fetch has landed on the compose view
+
+	searchLand(session, "nickname")
+	confirmFocusedLeaf(session, "ratchet")
+
+	// v runs the required-to-Validate gate first: Gadget is namespaced and
+	// the Session resolves no default namespace, so the gate prompts for
+	// metadata.name and then metadata.namespace before the dry-run flies.
+	session.Send(keyRune('v'))
+	session.Type("demo")
+	session.Send(enterKey)
+	session.Type("default")
+	session.Send(enterKey)
+	awaitRender(session, "Validate finding") // the Invalid outcome has landed
+
+	// Unsetting metadata.namespace — its own value, no confirm — brings the
+	// Ask-colored gate flag back to the status line and marks the finding
+	// stale: both of the status line's prompt-side tokens in one frame.
+	searchLand(session, "metadata.namespace")
+	session.Send(keyRune('d'))
+
+	// h steps from the nickname leaf to its parent, and d over spec — one
+	// filled value beneath it — opens the destructive confirm: the pending
+	// prompt the frame pins.
+	searchLand(session, "nickname")
+	session.Send(keyRune('h'))
+	session.Send(keyRune('d'))
+	awaitRender(session, "discard 1 value under spec")
+}
+
+// finalColoredFrame ends the Session like finalFrame but keeps the ANSI
+// styling: the colored goldens pin the escape sequences themselves, so a
+// wrong token mapping — a set value rendering in the error color — fails
+// mechanically instead of shipping silently.
+func finalColoredFrame(session *teatest.TestModel) string {
+	GinkgoHelper()
+	Expect(session.Quit()).To(Succeed())
+	shell, isShell := session.FinalModel(GinkgoTB(), teatest.WithFinalTimeout(frameTimeout)).(tui.Model)
+	Expect(isShell).To(BeTrue(), "the Session shell must be the program's final model")
+	return shell.View().Content
+}
+
 // searchLand lands the focus on a Field Path through the / field-search
 // overlay — the deterministic way to reach a node without counting rows.
 func searchLand(session *teatest.TestModel, query string) {
@@ -143,6 +219,35 @@ var _ = Describe("the golden frames", func() {
 			awaitRender(session, "Emit & quit")
 
 			Expect(finalFrame(session)).To(matchers.MatchGoldenFrame("testdata/golden/exit_menu.golden"))
+		})
+	})
+})
+
+var _ = Describe("the colored golden frames", func() {
+	// The color-regression tripwire (ADR-0007): one mixed-state compose
+	// frame pinned with its ANSI styling at truecolor, once per palette
+	// half. The ASCII goldens prove the glyphs; these prove the token
+	// mapping — every semantic accent in one frame, so a wrong mapping
+	// fails byte-for-byte.
+	When("the queried terminal background answers dark", func() {
+		It("pins the mixed-state compose frame on the dark palette halves", func() {
+			session := startColoredSession(lipgloss.Color("#1e1e1e"))
+			composeMixedState(session)
+
+			Expect(finalColoredFrame(session)).To(
+				matchers.MatchGoldenFrame("testdata/golden/compose_mixed_truecolor_dark.golden"),
+			)
+		})
+	})
+
+	When("the queried terminal background answers light", func() {
+		It("pins the mixed-state compose frame on the light palette halves", func() {
+			session := startColoredSession(lipgloss.Color("#ffffff"))
+			composeMixedState(session)
+
+			Expect(finalColoredFrame(session)).To(
+				matchers.MatchGoldenFrame("testdata/golden/compose_mixed_truecolor_light.golden"),
+			)
 		})
 	})
 })

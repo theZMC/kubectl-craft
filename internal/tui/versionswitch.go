@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 	"github.com/thezmc/kubectl-craft/internal/schema"
@@ -229,7 +230,9 @@ func (v versionList) highlighted() (data.Kind, bool) {
 }
 
 // view renders the list: the filter prompt and the visible window of served
-// versions, the Preferred Version marked as Meta row metadata.
+// versions, the Preferred Version marked as Meta row metadata. The row
+// tokens resolve once here, before the loop — never per row (the render hot
+// path's one-resolution-per-frame invariant).
 func (v versionList) view(th theme) string {
 	lines := []string{"switch version > " + v.filter}
 
@@ -239,24 +242,25 @@ func (v versionList) view(th theme) string {
 		return strings.Join(lines, "\n")
 	}
 
+	structure, meta := th.Structure(), th.Meta()
 	visible := v.visibleRows(len(matched))
 	for index := v.offset; index < min(v.offset+visible, len(matched)); index++ {
-		lines = append(lines, renderVersionRow(matched[index], index == v.cursor, th))
+		lines = append(lines, renderVersionRow(matched[index], index == v.cursor, structure, meta))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // renderVersionRow renders one served-version row: the group/version anchors
 // the row, the Preferred Version marking as Meta metadata alongside it.
-func renderVersionRow(version data.Kind, highlighted bool, th theme) string {
+func renderVersionRow(version data.Kind, highlighted bool, structure, meta lipgloss.Style) string {
 	cursor := "  "
 	name := version.GVK.GroupVersion().String()
 	if highlighted {
 		cursor = "> "
-		name = th.Structure().Render(name)
+		name = structure.Render(name)
 	}
 	if version.Preferred {
-		name += "  " + th.Meta().Render("(Preferred Version)")
+		name += "  " + meta.Render("(Preferred Version)")
 	}
 	return cursor + name
 }

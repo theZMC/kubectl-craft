@@ -435,7 +435,7 @@ func (c compose) findingDetailLines(row *treeRow) []string {
 	if c.validation.stale {
 		header += " (stale — the Draft changed since this Validate)"
 	}
-	lines := []string{"", c.theme.Structure().Render(header + ":")}
+	lines := []string{"", c.theme.NeedsFixing().Render(header + ":")}
 	for _, message := range messages {
 		lines = append(lines, "  "+message)
 	}
@@ -444,31 +444,34 @@ func (c compose) findingDetailLines(row *treeRow) []string {
 
 // validateGateSegment is the status line's required-to-Validate flag: the
 // metadata the dry-run cannot run without, shown from session start and
-// spelled apart from the schema-required count (DESIGN.md — Output).
+// spelled apart from the schema-required count (DESIGN.md — Output). It is
+// the gate's flag — what awaits the user's answer — so it carries Ask, the
+// same token the gate prompt itself renders through.
 func (c compose) validateGateSegment() string {
 	missing := c.missingValidateMetadata()
 	if len(missing) == 0 {
 		return ""
 	}
-	return c.theme.Structure().Render("Validate needs " + strings.Join(missing, " and "))
+	return c.theme.Ask().Render("Validate needs " + strings.Join(missing, " and "))
 }
 
 // validateStateSegment is the status line's Validate half: the clean
-// pass's positive confirmation, or the finding count — flagged stale once
-// the Draft has mutated past it. Unavailability renders in the results
-// pane instead, never as manifest state.
+// pass's ✔ all-clear — filled and well, so Set — or the finding count in
+// NeedsFixing, flagged stale once the Draft has mutated past it.
+// Unavailability renders in the results pane instead, never as manifest
+// state.
 func (c compose) validateStateSegment() string {
 	state := c.validation
 	switch {
 	case state == nil, state.unavailable != "":
 		return ""
 	case state.clean:
-		return c.theme.Meta().Render("✔ Validate passed")
+		return c.theme.Set().Render("✔ Validate passed")
 	case state.stale:
-		return c.theme.Structure().Render(fmt.Sprintf("%s %d Validate %s — stale, v revalidates",
+		return c.theme.NeedsFixing().Render(fmt.Sprintf("%s %d Validate %s — stale, v revalidates",
 			findingMarker, state.findingCount(), findingNoun(state.findingCount())))
 	default:
-		return c.theme.Structure().Render(fmt.Sprintf("%s %d Validate %s",
+		return c.theme.NeedsFixing().Render(fmt.Sprintf("%s %d Validate %s",
 			findingMarker, state.findingCount(), findingNoun(state.findingCount())))
 	}
 }
@@ -492,8 +495,10 @@ func (c compose) validationVerbs() string {
 
 // resultsView renders the results pane as the body overlay: the
 // unavailability notice — visually and verbally distinct from manifest
-// errors — or the Invalid outcome's Status summary and unmappable
-// findings.
+// errors, so its title keeps the overlay's Structure and never the
+// broken-manifest hue — or the Invalid outcome's rejection, whose title is
+// a Validate result and carries NeedsFixing; the server's own words stay
+// unpainted (ADR-0007).
 func (c compose) resultsView() string {
 	state := c.validation
 	if state == nil {
@@ -509,7 +514,7 @@ func (c compose) resultsView() string {
 	}
 
 	lines := []string{
-		c.theme.Structure().Render("Validate results — the server rejected the Manifest"),
+		c.theme.NeedsFixing().Render("Validate results — the server rejected the Manifest"),
 		summaryLine(state.summary),
 	}
 	if state.stale {

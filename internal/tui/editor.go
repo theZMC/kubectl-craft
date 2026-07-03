@@ -307,7 +307,7 @@ func (e fieldEditor) hints() string {
 
 // viewLines renders the open widget for the detail pane: the field, the
 // widget itself, and the inline rejection when the last confirm was turned
-// away.
+// away — what rejects, so the rejection carries NeedsFixing (ADR-0007).
 func (e fieldEditor) viewLines(th theme) []string {
 	editing := "editing — " + e.meta.Type
 	if e.kind == editorRawYAML {
@@ -316,7 +316,7 @@ func (e fieldEditor) viewLines(th theme) []string {
 	lines := []string{th.Structure().Render(e.row.label), editing, ""}
 	lines = append(lines, e.widgetLines(th)...)
 	if e.rejection != "" {
-		lines = append(lines, "", th.Structure().Render(e.rejection))
+		lines = append(lines, "", th.NeedsFixing().Render(e.rejection))
 	}
 	return lines
 }

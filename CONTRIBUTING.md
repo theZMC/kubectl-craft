@@ -142,6 +142,16 @@ comparing or writing: trailing whitespace is stripped from every line (the panes
 pad lines to their widths) and each frame ends with exactly one newline, which
 keeps the checked-in goldens out of the pre-commit fixer hooks' way.
 
+Alongside the Ascii set live the **colored goldens**
+(`compose_mixed_truecolor_{dark,light}.golden`): one mixed-state compose frame —
+a set value, missing required markers, a mapped Validate finding, and a pending
+confirm together — pinned **with** its ANSI styling at truecolor, once per
+palette half (the queried background injected as a `tea.BackgroundColorMsg`).
+They are the color-regression tripwire for the owned palette (ADR-0007): a wrong
+token mapping — say, a set value rendering in the error color — fails
+byte-for-byte instead of shipping silently. They regenerate through the same
+switch as every other golden.
+
 Regenerate them with (the golden Manifests in `internal/schema/testdata/golden/`
 answer to the same switch — point ginkgo at `./internal/schema` for those):
 

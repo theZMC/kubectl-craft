@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 )
@@ -269,6 +270,8 @@ func fuzzyMatches(filter, candidate string) bool {
 }
 
 // view renders the filter prompt and the visible window of matching rows.
+// The row tokens resolve once here, before the loop — never per row (the
+// render hot path's one-resolution-per-frame invariant).
 func (p picker) view() string {
 	var view strings.Builder
 
@@ -286,29 +289,30 @@ func (p picker) view() string {
 		return view.String()
 	}
 
+	structure, meta := p.theme.Structure(), p.theme.Meta()
 	for i := p.offset; i < min(p.offset+visible, len(matches)); i++ {
-		view.WriteString(p.renderRow(matches[i], i == p.cursor))
+		view.WriteString(renderPickerRow(matches[i], i == p.cursor, structure, meta))
 	}
 
 	return view.String()
 }
 
-// renderRow renders one Kind row: the kind name anchors the row — the
+// renderPickerRow renders one Kind row: the kind name anchors the row — the
 // Structure token marking the one the selection sits on — with the
 // group/version and short names as Meta metadata alongside it.
-func (p picker) renderRow(kind data.Kind, highlighted bool) string {
+func renderPickerRow(kind data.Kind, highlighted bool, structure, meta lipgloss.Style) string {
 	indicator := "  "
 	name := kind.GVK.Kind
 
 	if highlighted {
 		indicator = "> "
-		name = p.theme.Structure().Render(name)
+		name = structure.Render(name)
 	}
 
-	meta := kind.GVK.GroupVersion().String()
+	rowMeta := kind.GVK.GroupVersion().String()
 	if len(kind.ShortNames) > 0 {
-		meta += " (" + strings.Join(kind.ShortNames, ", ") + ")"
+		rowMeta += " (" + strings.Join(kind.ShortNames, ", ") + ")"
 	}
 
-	return indicator + name + "  " + p.theme.Meta().Render(meta) + "\n"
+	return indicator + name + "  " + meta.Render(rowMeta) + "\n"
 }
