@@ -1,7 +1,8 @@
 package tui_test
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -94,12 +95,21 @@ func press(model tui.Model, msgs ...tea.Msg) (tui.Model, tea.Cmd) {
 	return model, cmd
 }
 
+// render renders the shell's frame as the plain string the v1 suite saw
+// under its Ascii color profile: lipgloss v2 styles always emit ANSI —
+// profile-aware downsampling moved to the program's output layer — so the
+// state-first specs, which read the model directly with no program in
+// between, strip the styling themselves.
+func render(model tui.Model) string {
+	return ansi.Strip(model.View().Content)
+}
+
 // typeFilter presses one printable key per rune, the way a user types a
 // type-to-filter query.
 func typeFilter(model tui.Model, query string) tui.Model {
 	GinkgoHelper()
 	for _, r := range query {
-		model, _ = press(model, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		model, _ = press(model, tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 	return model
 }
@@ -145,9 +155,9 @@ var _ = Describe("the Session shell", func() {
 			Expect(ok).To(BeTrue())
 			Expect(highlighted).To(Equal(kindNamed("ConfigMap", "v1")))
 
-			Expect(model.View()).To(ContainSubstring("Deployment"))
-			Expect(model.View()).To(ContainSubstring("apps/v1"))
-			Expect(model.View()).To(ContainSubstring("v1 (cm)"),
+			Expect(render(model)).To(ContainSubstring("Deployment"))
+			Expect(render(model)).To(ContainSubstring("apps/v1"))
+			Expect(render(model)).To(ContainSubstring("v1 (cm)"),
 				"the core group's metadata is the bare version with the short names")
 		})
 	})
@@ -168,7 +178,7 @@ var _ = Describe("the Session shell", func() {
 		})
 
 		It("re-anchors the selection on the narrowed list's first row", func() {
-			model, _ := press(newShell(), tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyDown})
+			model, _ := press(newShell(), tea.KeyPressMsg{Code: tea.KeyDown}, tea.KeyPressMsg{Code: tea.KeyDown})
 			model = typeFilter(model, "hpa")
 
 			highlighted, ok := model.HighlightedKind()
@@ -180,12 +190,12 @@ var _ = Describe("the Session shell", func() {
 		It("re-widens one keystroke at a time as backspace erases the filter", func() {
 			model := typeFilter(newShell(), "gz")
 
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyBackspace})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyBackspace})
 			Expect(model.Filter()).To(Equal("g"))
 			Expect(kindNames(model.MatchedKinds())).To(ContainElements("Gadget", "ConfigMap"),
 				"g fuzzy-matches more than the short name did")
 
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyBackspace})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyBackspace})
 			Expect(model.Filter()).To(BeEmpty())
 			Expect(model.MatchedKinds()).To(HaveLen(len(browsableKinds())))
 		})
@@ -197,18 +207,18 @@ var _ = Describe("the Session shell", func() {
 			_, ok := model.HighlightedKind()
 			Expect(ok).To(BeFalse())
 
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			Expect(cmd).To(BeNil())
 			_, selected := model.SelectedKind()
 			Expect(selected).To(BeFalse())
-			Expect(model.View()).To(ContainSubstring("no Kinds match"))
+			Expect(render(model)).To(ContainSubstring("no Kinds match"))
 		})
 	})
 
 	When("the selection moves through the Kind list", func() {
 		DescribeTable(
 			"movement keys slide the highlight and clamp at the edges",
-			func(down, up tea.KeyMsg) {
+			func(down, up tea.KeyPressMsg) {
 				model := newShell()
 				rowCount := len(model.MatchedKinds())
 
@@ -229,9 +239,9 @@ var _ = Describe("the Session shell", func() {
 				Expect(highlighted.GVK.Kind).To(Equal("HorizontalPodAutoscaler"))
 			},
 			Entry("arrow keys",
-				tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyUp}),
+				tea.KeyPressMsg{Code: tea.KeyDown}, tea.KeyPressMsg{Code: tea.KeyUp}),
 			Entry("Ctrl-j/k",
-				tea.KeyMsg{Type: tea.KeyCtrlJ}, tea.KeyMsg{Type: tea.KeyCtrlK}),
+				tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}),
 		)
 	})
 
@@ -239,7 +249,7 @@ var _ = Describe("the Session shell", func() {
 		It("emits the typed handoff carrying the GVK and group-version path", func() {
 			model := typeFilter(newShell(), "deploy")
 
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			Expect(cmd).NotTo(BeNil())
 
 			msg := cmd()
@@ -253,7 +263,7 @@ var _ = Describe("the Session shell", func() {
 
 		It("consumes the handoff by lazily fetching the Kind's group document, then opens the compose view", func() {
 			model := typeFilter(newShell(), "deploy")
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 			model, fetch := press(model, cmd())
 
@@ -271,7 +281,7 @@ var _ = Describe("the Session shell", func() {
 
 		DescribeTable(
 			"the compose view keeps the empty-Draft exit grammar",
-			func(key tea.KeyMsg) {
+			func(key tea.KeyPressMsg) {
 				model := composeDeployment()
 
 				_, quit := press(model, key)
@@ -280,9 +290,9 @@ var _ = Describe("the Session shell", func() {
 					"the Draft is still always empty in M2, so quitting needs no prompt")
 			},
 			Entry("q — the empty-Draft rule",
-				tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}),
+				tea.KeyPressMsg{Code: 'q', Text: "q"}),
 			Entry("Ctrl-c — the conventional escape hatch",
-				tea.KeyMsg{Type: tea.KeyCtrlC}),
+				tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}),
 		)
 	})
 
@@ -290,14 +300,14 @@ var _ = Describe("the Session shell", func() {
 		It("clears first, then dismisses: an active filter absorbs the first Esc", func() {
 			model := typeFilter(newShell(), "hpa")
 
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 			Expect(cmd).To(BeNil(),
 				"Esc with an active filter clears it and must not quit")
 			Expect(model.Filter()).To(BeEmpty())
 			Expect(model.MatchedKinds()).To(HaveLen(len(browsableKinds())),
 				"clearing the filter re-widens to the full Kind list")
 
-			_, quit := press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			_, quit := press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 			Expect(quit).NotTo(BeNil())
 			Expect(quit()).To(Equal(tea.QuitMsg{}),
 				"Esc on an empty filter quits — an empty Session has no Draft, so no confirmation")
@@ -306,13 +316,13 @@ var _ = Describe("the Session shell", func() {
 		It("lets Ctrl-c quit immediately even while a filter is active", func() {
 			model := typeFilter(newShell(), "hpa")
 
-			_, quit := press(model, tea.KeyMsg{Type: tea.KeyCtrlC})
+			_, quit := press(model, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 			Expect(quit).NotTo(BeNil())
 			Expect(quit()).To(Equal(tea.QuitMsg{}))
 		})
 
 		It("treats q as a filter key, not an exit verb — the picker is a search surface", func() {
-			model, cmd := press(newShell(), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+			model, cmd := press(newShell(), tea.KeyPressMsg{Code: 'q', Text: "q"})
 
 			Expect(cmd).To(BeNil())
 			Expect(model.Filter()).To(Equal("q"))
@@ -323,24 +333,24 @@ var _ = Describe("the Session shell", func() {
 		It("scrolls the list with the selection", func() {
 			model, _ := press(newShell(), tea.WindowSizeMsg{Width: 60, Height: 4})
 
-			Expect(model.View()).To(ContainSubstring("ConfigMap"))
-			Expect(model.View()).NotTo(ContainSubstring("Gadget"),
+			Expect(render(model)).To(ContainSubstring("ConfigMap"))
+			Expect(render(model)).NotTo(ContainSubstring("Gadget"),
 				"rows beyond the three visible lines start scrolled out")
 
 			for range len(browsableKinds()) {
-				model, _ = press(model, tea.KeyMsg{Type: tea.KeyDown})
+				model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyDown})
 			}
 
-			Expect(model.View()).To(ContainSubstring("Gadget"),
+			Expect(render(model)).To(ContainSubstring("Gadget"),
 				"the viewport must follow the selection to the bottom")
-			Expect(model.View()).NotTo(ContainSubstring("ConfigMap"),
+			Expect(render(model)).NotTo(ContainSubstring("ConfigMap"),
 				"the top rows scroll out as the selection descends")
 
 			for range len(browsableKinds()) {
-				model, _ = press(model, tea.KeyMsg{Type: tea.KeyUp})
+				model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyUp})
 			}
 
-			Expect(model.View()).To(ContainSubstring("ConfigMap"),
+			Expect(render(model)).To(ContainSubstring("ConfigMap"),
 				"the viewport must follow the selection back to the top")
 		})
 
@@ -349,15 +359,78 @@ var _ = Describe("the Session shell", func() {
 			func(size tea.WindowSizeMsg) {
 				model, _ := press(newShell(), size)
 
-				Expect(model.View()).To(ContainSubstring(">"),
+				Expect(render(model)).To(ContainSubstring(">"),
 					"the filter prompt is the last thing to give up")
 
-				model, _ = press(model, tea.KeyMsg{Type: tea.KeyDown})
-				Expect(model.View()).NotTo(BeEmpty())
+				model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyDown})
+				Expect(render(model)).NotTo(BeEmpty())
 			},
 			Entry("one row tall", tea.WindowSizeMsg{Width: 20, Height: 1}),
 			Entry("two rows tall", tea.WindowSizeMsg{Width: 20, Height: 2}),
 			Entry("zero-sized", tea.WindowSizeMsg{Width: 0, Height: 0}),
 		)
+	})
+})
+
+var _ = Describe("pasting into the Session shell", func() {
+	// Bracketed paste is its own message in Bubble Tea v2 — v1 delivered it
+	// as one rune key press — and it keeps v1's semantics: the content types
+	// into whichever text surface is open, verbatim, and a paste is never a
+	// command (v1 bracketed pastes so they could not match shortcuts).
+	When("the Kind picker is open", func() {
+		It("types the pasted text into the filter", func() {
+			model, _ := press(newShell(), tea.PasteMsg{Content: "hpa"})
+
+			Expect(model.Filter()).To(Equal("hpa"))
+			Expect(kindNames(model.MatchedKinds())).To(ConsistOf(
+				"HorizontalPodAutoscaler", "HorizontalPodAutoscaler",
+			))
+		})
+	})
+
+	When("the compose view is in navigate mode", func() {
+		It("stays inert — pasted text never runs commands", func() {
+			model := composeDeployment()
+
+			model, cmd := press(model, tea.PasteMsg{Content: "q"})
+
+			Expect(cmd).To(BeNil(), "pasting q must not quit or open the exit menu")
+			Expect(model.ExitMenuOpen()).To(BeFalse())
+			Expect(model.ComposeOpen()).To(BeTrue())
+		})
+	})
+
+	When("the / field-search overlay is open", func() {
+		It("types the pasted text into the filter", func() {
+			model, _ := press(composeDeployment(), keyRune('/'))
+			Expect(model.SearchOpen()).To(BeTrue())
+
+			model, _ = press(model, tea.PasteMsg{Content: "replicas"})
+
+			Expect(model.SearchFilter()).To(Equal("replicas"))
+		})
+	})
+
+	When("a text widget is open on a leaf", func() {
+		It("pastes into the buffer and confirms into the Draft", func() {
+			model := openWidget(composeGadget(), "spec.nickname")
+
+			model, _ = press(model, tea.PasteMsg{Content: "ratchet"})
+			model, _ = press(model, enterKey)
+
+			Expect(model.Editing()).To(BeFalse())
+			Expect(draftValue(model, "spec.nickname")).To(Equal("ratchet"))
+		})
+	})
+
+	When("the ? help overlay is open", func() {
+		It("closes it, the way any key does", func() {
+			model, _ := press(composeDeployment(), keyRune('?'))
+			Expect(model.HelpOpen()).To(BeTrue())
+
+			model, _ = press(model, tea.PasteMsg{Content: "anything"})
+
+			Expect(model.HelpOpen()).To(BeFalse())
+		})
 	})
 })

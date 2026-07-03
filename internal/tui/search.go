@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // searchHints is the `/` field-search overlay's own hint line: the overlay
@@ -72,7 +72,7 @@ type fieldSearch struct {
 // keys filter, ↑/↓ and Ctrl-j/k move, Enter selects, Esc clears-then-
 // dismisses. Every other printable key types into the filter — a search
 // surface has no command letters, so `q` narrows instead of quitting.
-func (s fieldSearch) update(key tea.KeyMsg) (fieldSearch, searchOutcome) {
+func (s fieldSearch) update(key tea.KeyPressMsg) (fieldSearch, searchOutcome) {
 	switch key.String() {
 	case "esc":
 		if s.filter != "" {
@@ -119,11 +119,18 @@ func (s fieldSearch) eraseFilterRune() fieldSearch {
 
 // typeIntoFilter appends printable keys to the filter — the fzf-style
 // grammar: typing narrows immediately, no edit mode to enter first.
-func (s fieldSearch) typeIntoFilter(key tea.KeyMsg) fieldSearch {
-	if key.Type != tea.KeyRunes || key.Alt {
+func (s fieldSearch) typeIntoFilter(key tea.KeyPressMsg) fieldSearch {
+	if key.Text == "" || key.Code == tea.KeySpace || key.Mod.Contains(tea.ModAlt) {
 		return s
 	}
-	s.filter += string(key.Runes)
+	s.filter += key.Text
+	return s.resetToTop()
+}
+
+// paste appends pasted text to the filter as-is, the way v1's rune-key
+// paste delivery typed it in.
+func (s fieldSearch) paste(content string) fieldSearch {
+	s.filter += content
 	return s.resetToTop()
 }
 

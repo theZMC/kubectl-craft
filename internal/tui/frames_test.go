@@ -5,9 +5,10 @@ import (
 	"context"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/charmbracelet/x/exp/teatest"
-	"github.com/muesli/termenv"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/charmbracelet/x/exp/teatest/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -37,23 +38,21 @@ const (
 	frameTimeout = 10 * time.Second
 )
 
-var _ = BeforeSuite(func() {
-	// Deterministic frames also need a stable color profile: lipgloss
-	// otherwise sniffs the environment at first render, so CI and a local
-	// terminal could pin different bytes. Ascii strips every style to
-	// plain text before any spec renders anything.
-	lipgloss.SetColorProfile(termenv.Ascii)
-})
-
 // startGoldenSession runs the Session shell as a real tea.Program on
 // teatest's in-memory terminal at the pinned frame size, over the same
 // fixture corpus the state-first specs use. teatest builds the program on
-// in-memory buffers itself, so the openTTY seam never opens.
+// in-memory buffers itself, so the openTTY seam never opens. Deterministic
+// frames need a stable color profile — the program otherwise sniffs the
+// environment, so CI and a local terminal could pin different bytes; NoTTY
+// is lipgloss v2's spelling of v1's suite-wide Ascii profile, stripping
+// every style from the program's output before any sentinel is scanned.
 func startGoldenSession(link *tui.DeepLink) *teatest.TestModel {
 	GinkgoHelper()
 	shell := tui.New(context.Background(), browsableKinds(), corpusFetcher(), corpusIndex(),
 		&stubValidator{outcome: data.Clean{}}, "", link)
-	return teatest.NewTestModel(GinkgoTB(), shell, teatest.WithInitialTermSize(goldenWidth, goldenHeight))
+	return teatest.NewTestModel(GinkgoTB(), shell,
+		teatest.WithInitialTermSize(goldenWidth, goldenHeight),
+		teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.NoTTY)))
 }
 
 // awaitRender blocks until the program's output carries the sentinel: the
@@ -71,13 +70,16 @@ func awaitRender(session *teatest.TestModel, sentinel string) {
 // finalFrame ends the Session and renders the final frame from the final
 // model: the quiesced view at the pinned size, free of the terminal's
 // cursor-movement noise. Quit ends the program without another Update, so
-// the frame is exactly the state the spec drove to.
+// the frame is exactly the state the spec drove to. lipgloss v2 styles
+// always emit ANSI — downsampling moved to the program's output layer —
+// so the harness strips the styling here, exactly what the v1 suite's
+// Ascii profile did before any spec rendered anything.
 func finalFrame(session *teatest.TestModel) string {
 	GinkgoHelper()
 	Expect(session.Quit()).To(Succeed())
 	shell, isShell := session.FinalModel(GinkgoTB(), teatest.WithFinalTimeout(frameTimeout)).(tui.Model)
 	Expect(isShell).To(BeTrue(), "the Session shell must be the program's final model")
-	return shell.View()
+	return ansi.Strip(shell.View().Content)
 }
 
 // searchLand lands the focus on a Field Path through the / field-search

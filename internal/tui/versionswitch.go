@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 	"github.com/thezmc/kubectl-craft/internal/schema"
@@ -106,7 +106,7 @@ type versionList struct {
 // update applies one key press under the type-to-filter grammar: printable
 // keys filter, ↑/↓ and Ctrl-j/k move, Enter selects, Esc clears-then-
 // dismisses — a search surface has no command letters.
-func (v versionList) update(key tea.KeyMsg) (versionList, versionOutcome) {
+func (v versionList) update(key tea.KeyPressMsg) (versionList, versionOutcome) {
 	switch key.String() {
 	case "esc":
 		if v.filter != "" {
@@ -153,11 +153,18 @@ func (v versionList) eraseFilterRune() versionList {
 
 // typeIntoFilter appends printable keys to the filter — the fzf-style
 // grammar: typing narrows immediately.
-func (v versionList) typeIntoFilter(key tea.KeyMsg) versionList {
-	if key.Type != tea.KeyRunes || key.Alt {
+func (v versionList) typeIntoFilter(key tea.KeyPressMsg) versionList {
+	if key.Text == "" || key.Code == tea.KeySpace || key.Mod.Contains(tea.ModAlt) {
 		return v
 	}
-	v.filter += string(key.Runes)
+	v.filter += key.Text
+	return v.resetToTop()
+}
+
+// paste appends pasted text to the filter as-is, the way v1's rune-key
+// paste delivery typed it in.
+func (v versionList) paste(content string) versionList {
+	v.filter += content
 	return v.resetToTop()
 }
 
@@ -283,7 +290,7 @@ func (c compose) otherVersions() []data.Kind {
 // dismissal returns to navigate mode, and selecting a version closes the
 // list and asks the shell to switch — the target's group document travels
 // the same lazy fetch path a picker selection does.
-func (c compose) updateVersionList(key tea.KeyMsg) (compose, tea.Cmd) {
+func (c compose) updateVersionList(key tea.KeyPressMsg) (compose, tea.Cmd) {
 	list, outcome := c.versionList.update(key)
 
 	switch outcome {
@@ -302,7 +309,7 @@ func (c compose) updateVersionList(key tea.KeyMsg) (compose, tea.Cmd) {
 // updateSwitchConfirm applies one key press to the open drop confirm, in the
 // modal grammar: Enter accepts the drops and commits the switch, Esc keeps
 // composing at the current version untouched, and everything else is inert.
-func (c compose) updateSwitchConfirm(key tea.KeyMsg) (compose, tea.Cmd) {
+func (c compose) updateSwitchConfirm(key tea.KeyPressMsg) (compose, tea.Cmd) {
 	switch key.String() {
 	case "enter":
 		return c, func() tea.Msg { return versionSwitchAcceptedMsg{} }
@@ -410,7 +417,7 @@ func (m Model) commitVersionSwitch(pending pendingSwitch) Model {
 // the Draft is never lost to an abandoned switch, and the exit ramp's
 // protections stay one keypress away in the compose view — while Ctrl-c
 // remains the immediate escape hatch.
-func (m Model) switchTransitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) switchTransitKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "ctrl+c":
 		return m, tea.Quit

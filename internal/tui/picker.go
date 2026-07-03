@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 )
@@ -87,7 +87,7 @@ func preferredFirst(a, b data.Kind) int {
 // update applies one key press under the type-to-filter grammar. Every key
 // outside the grammar's verbs types into the filter — a search surface has
 // no command letters, so `q` narrows to Quota instead of quitting.
-func (p picker) update(key tea.KeyMsg) (picker, tea.Cmd) {
+func (p picker) update(key tea.KeyPressMsg) (picker, tea.Cmd) {
 	switch key.String() {
 	case "ctrl+c":
 		// The conventional escape hatch quits immediately: an empty
@@ -161,12 +161,20 @@ func (p picker) eraseFilterRune() picker {
 
 // typeIntoFilter appends printable keys to the filter — the fzf-style
 // grammar: typing narrows immediately, no edit mode to enter first.
-func (p picker) typeIntoFilter(key tea.KeyMsg) picker {
-	if key.Type != tea.KeyRunes || key.Alt {
+func (p picker) typeIntoFilter(key tea.KeyPressMsg) picker {
+	if key.Text == "" || key.Code == tea.KeySpace || key.Mod.Contains(tea.ModAlt) {
 		return p
 	}
 
-	p.filter += string(key.Runes)
+	p.filter += key.Text
+
+	return p.resetToTop()
+}
+
+// paste appends pasted text to the filter as-is, the way v1's rune-key
+// paste delivery typed it in.
+func (p picker) paste(content string) picker {
+	p.filter += content
 
 	return p.resetToTop()
 }

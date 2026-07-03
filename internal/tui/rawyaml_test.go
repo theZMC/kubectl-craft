@@ -1,14 +1,14 @@
 package tui_test
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
 	"github.com/thezmc/kubectl-craft/internal/tui"
 )
 
-var ctrlSKey = tea.KeyMsg{Type: tea.KeyCtrlS}
+var ctrlSKey = tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl}
 
 // tuningGraft is the graft the raw-YAML specs compose at Gadget's
 // spec.tuning — the corpus's canonical preserve-unknown-fields fixture —
@@ -40,8 +40,8 @@ var _ = Describe("the raw-YAML escape hatch", func() {
 			Expect(cmd).To(BeNil())
 			Expect(model.Editing()).To(BeTrue(),
 				"the raw-YAML text area is the schema-blind leaf's value widget")
-			Expect(model.View()).To(ContainSubstring("composing raw YAML"))
-			Expect(model.View()).To(ContainSubstring("ctrl+s confirm"),
+			Expect(render(model)).To(ContainSubstring("composing raw YAML"))
+			Expect(render(model)).To(ContainSubstring("ctrl+s confirm"),
 				"the hint bar documents the multiline confirm — enter types newlines here")
 		})
 
@@ -80,7 +80,7 @@ var _ = Describe("the raw-YAML escape hatch", func() {
 			model, _ = press(model, ctrlSKey)
 
 			Expect(model.Editing()).To(BeTrue(), "a rejected confirm keeps the text area open")
-			Expect(model.View()).To(ContainSubstring("parsing the raw YAML grafted"))
+			Expect(render(model)).To(ContainSubstring("parsing the raw YAML grafted"))
 			_, filled := model.DraftValueAt("spec.tuning")
 			Expect(filled).To(BeFalse(), "malformed YAML never reaches the Draft")
 		})
@@ -91,7 +91,7 @@ var _ = Describe("the raw-YAML escape hatch", func() {
 			model, _ = press(model, ctrlSKey)
 
 			Expect(model.Editing()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("holds no value"),
+			Expect(render(model)).To(ContainSubstring("holds no value"),
 				"a graft holding nothing is a rejection, not an implicit unset")
 		})
 
@@ -100,7 +100,7 @@ var _ = Describe("the raw-YAML escape hatch", func() {
 
 			model = openWidget(model, "spec.tuning")
 
-			view := model.View()
+			view := render(model)
 			Expect(view).To(ContainSubstring("knobs:"))
 			Expect(view).To(ContainSubstring("gain: 3"),
 				"the text area prefills with the graft, so editing amends instead of retyping")
@@ -111,14 +111,14 @@ var _ = Describe("the raw-YAML escape hatch", func() {
 		It("sizes the graft on the tree row instead of spelling it inline", func() {
 			model := graftTuning(composeGadget())
 
-			Expect(model.View()).To(ContainSubstring("tuning: raw YAML (2 lines)"),
+			Expect(render(model)).To(ContainSubstring("tuning: raw YAML (2 lines)"),
 				"a graft is opaque to the Type Schema — the row says how much sits there")
 		})
 
 		It("shows the graft's summary and its YAML in the detail pane", func() {
 			model := focusField(graftTuning(composeGadget()), "spec.tuning")
 
-			view := model.View()
+			view := render(model)
 			Expect(view).To(ContainSubstring("grafted: raw YAML (2 lines)"))
 			Expect(view).To(ContainSubstring("gain: 3"),
 				"the detail pane shows what was grafted, not just that something was")
@@ -127,7 +127,7 @@ var _ = Describe("the raw-YAML escape hatch", func() {
 		It("offers the escape hatch's verbs on the schema-blind row's hint bar", func() {
 			model := focusField(composeGadget(), "spec.tuning")
 
-			Expect(model.View()).To(ContainSubstring("e $EDITOR"),
+			Expect(render(model)).To(ContainSubstring("e $EDITOR"),
 				"the hint bar advertises the pop-out where it serves the focused row")
 		})
 	})
@@ -140,7 +140,7 @@ var _ = Describe("the raw-YAML escape hatch", func() {
 
 			Expect(model.ConfirmingUnset()).To(BeTrue(),
 				"a graft is a whole subtree behind one entry, so d confirms first")
-			Expect(model.View()).To(ContainSubstring(
+			Expect(render(model)).To(ContainSubstring(
 				"discard the raw YAML (2 lines) grafted at spec.tuning?",
 			))
 
@@ -158,7 +158,7 @@ var _ = Describe("the raw-YAML escape hatch", func() {
 			Expect(model.ConfirmingUnset()).To(BeFalse())
 			_, filled := model.DraftValueAt("spec.tuning")
 			Expect(filled).To(BeFalse(), "unset removes the graft — sparse semantics")
-			Expect(model.View()).NotTo(ContainSubstring("raw YAML (2 lines)"))
+			Expect(render(model)).NotTo(ContainSubstring("raw YAML (2 lines)"))
 		})
 	})
 })

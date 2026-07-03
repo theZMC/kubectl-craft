@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -154,8 +154,8 @@ func crdKind() data.Kind {
 }
 
 // keyRune is one printable navigate-mode key press.
-func keyRune(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+func keyRune(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }
 
 // openKind drives the shell through the typed handoff and the lazy fetch
@@ -174,7 +174,7 @@ func openKind(model tui.Model, kind data.Kind) tui.Model {
 func composeDeployment() tui.Model {
 	GinkgoHelper()
 	model := typeFilter(newShell(), "deploy")
-	model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+	model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 	Expect(cmd).NotTo(BeNil())
 	model, fetch := press(model, cmd())
 	Expect(fetch).NotTo(BeNil())
@@ -210,7 +210,7 @@ var _ = Describe("the compose view", func() {
 		It("fetches the group document addressed by the live index's content hash", func() {
 			fetcher := corpusFetcher()
 			model := typeFilter(newShellWith(fetcher), "deploy")
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			model, fetch := press(model, cmd())
 
 			model, _ = press(model, fetch())
@@ -223,13 +223,13 @@ var _ = Describe("the compose view", func() {
 
 		It("shows a loading state with its hint bar while the group document travels", func() {
 			model := typeFilter(newShell(), "deploy")
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			model, _ = press(model, cmd())
 
 			Expect(model.FetchingDocument()).To(BeTrue())
 			Expect(model.Breadcrumb()).To(Equal("apps/v1 Deployment"))
-			Expect(model.View()).To(ContainSubstring("fetching the apis/apps/v1"))
-			Expect(model.View()).To(ContainSubstring("esc Kind picker"),
+			Expect(render(model)).To(ContainSubstring("fetching the apis/apps/v1"))
+			Expect(render(model)).To(ContainSubstring("esc Kind picker"),
 				"the loading state's hint bar must document the way out")
 		})
 
@@ -248,7 +248,7 @@ var _ = Describe("the compose view", func() {
 			fetcher := corpusFetcher()
 			model := openKind(newShellWith(fetcher), kindNamed("Gadget", "v1"))
 
-			model, back := press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, back := press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 			Expect(back).NotTo(BeNil())
 			model, _ = press(model, back())
 			_, selected := model.SelectedKind()
@@ -265,10 +265,10 @@ var _ = Describe("the compose view", func() {
 		It("keeps a fetch that lands after Esc as a memoized parse, without leaving the picker", func() {
 			fetcher := corpusFetcher()
 			model := typeFilter(newShellWith(fetcher), "deploy")
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			model, fetch := press(model, cmd())
 
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 			model, _ = press(model, fetch())
 
 			Expect(model.ComposeOpen()).To(BeFalse(),
@@ -287,7 +287,7 @@ var _ = Describe("the compose view", func() {
 		It("surfaces a failed fetch as an in-TUI error state, never a crash", func() {
 			fetcher := &stubFetcher{failWith: errors.New("the cluster hung up mid-fetch")}
 			model := typeFilter(newShellWith(fetcher), "deploy")
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			model, fetch := press(model, cmd())
 
 			model, _ = press(model, fetch())
@@ -295,9 +295,9 @@ var _ = Describe("the compose view", func() {
 			message, failed := model.ComposeError()
 			Expect(failed).To(BeTrue())
 			Expect(message).To(ContainSubstring("the cluster hung up mid-fetch"))
-			Expect(model.View()).To(ContainSubstring("the cluster hung up mid-fetch"),
+			Expect(render(model)).To(ContainSubstring("the cluster hung up mid-fetch"),
 				"the error must render in the TUI, with the Session still running")
-			Expect(model.View()).To(ContainSubstring("esc Kind picker"),
+			Expect(render(model)).To(ContainSubstring("esc Kind picker"),
 				"the error state's hint bar must document the way back")
 		})
 
@@ -321,7 +321,7 @@ var _ = Describe("the compose view", func() {
 
 		DescribeTable(
 			"the error state keeps the empty-Draft exit grammar",
-			func(key tea.KeyMsg) {
+			func(key tea.KeyPressMsg) {
 				fetcher := &stubFetcher{failWith: errors.New("broken")}
 				model := openKindExpectingFailure(newShellWith(fetcher), kindNamed("Deployment", "v1"))
 
@@ -329,15 +329,15 @@ var _ = Describe("the compose view", func() {
 				Expect(quit).NotTo(BeNil())
 				Expect(quit()).To(Equal(tea.QuitMsg{}))
 			},
-			Entry("q", tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}),
-			Entry("Ctrl-c", tea.KeyMsg{Type: tea.KeyCtrlC}),
+			Entry("q", tea.KeyPressMsg{Code: 'q', Text: "q"}),
+			Entry("Ctrl-c", tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}),
 		)
 
 		It("returns to the Kind picker from the error state on Esc", func() {
 			fetcher := &stubFetcher{failWith: errors.New("broken")}
 			model := openKindExpectingFailure(newShellWith(fetcher), kindNamed("Deployment", "v1"))
 
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 
 			_, failed := model.ComposeError()
 			Expect(failed).To(BeFalse())
@@ -349,7 +349,7 @@ var _ = Describe("the compose view", func() {
 	When("navigate-mode keys move the focus through the field tree", func() {
 		DescribeTable(
 			"movement keys slide the focus and the breadcrumb tracks it",
-			func(down, up tea.KeyMsg) {
+			func(down, up tea.KeyPressMsg) {
 				model := composeDeployment()
 
 				model, _ = press(model, down)
@@ -364,7 +364,7 @@ var _ = Describe("the compose view", func() {
 				Expect(model.FocusedFieldPath()).To(Equal("metadata"))
 			},
 			Entry("j/k", keyRune('j'), keyRune('k')),
-			Entry("arrow keys", tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyUp}),
+			Entry("arrow keys", tea.KeyPressMsg{Code: tea.KeyDown}, tea.KeyPressMsg{Code: tea.KeyUp}),
 		)
 
 		It("clamps at the tree's edges instead of wrapping", func() {
@@ -394,7 +394,7 @@ var _ = Describe("the compose view", func() {
 	When("h/l and the arrow keys collapse and expand the focused field", func() {
 		DescribeTable(
 			"expanding a parent reveals its children and collapsing hides them again",
-			func(expand, collapse tea.KeyMsg) {
+			func(expand, collapse tea.KeyPressMsg) {
 				model := focusField(composeDeployment(), "spec")
 
 				model, _ = press(model, expand)
@@ -407,7 +407,7 @@ var _ = Describe("the compose view", func() {
 				Expect(model.FocusedFieldPath()).To(Equal("spec"))
 			},
 			Entry("h/l", keyRune('l'), keyRune('h')),
-			Entry("arrow keys", tea.KeyMsg{Type: tea.KeyRight}, tea.KeyMsg{Type: tea.KeyLeft}),
+			Entry("arrow keys", tea.KeyPressMsg{Code: tea.KeyRight}, tea.KeyPressMsg{Code: tea.KeyLeft}),
 		)
 
 		It("steps l into the first child of an already-expanded parent", func() {
@@ -446,7 +446,7 @@ var _ = Describe("the compose view", func() {
 
 			Expect(model.FocusedFieldPath()).To(Equal("spec.template.spec.containers"),
 				"dots address schema-defined fields, never individual items")
-			Expect(model.View()).To(ContainSubstring("[items]"))
+			Expect(render(model)).To(ContainSubstring("[items]"))
 		})
 	})
 
@@ -454,17 +454,17 @@ var _ = Describe("the compose view", func() {
 		It("toggles a parent open and closed", func() {
 			model := focusField(composeDeployment(), "spec")
 
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			Expect(model.VisibleFieldPaths()).To(ContainElement("spec.template"))
 
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			Expect(model.VisibleFieldPaths()).NotTo(ContainElement("spec.template"))
 		})
 
 		It("opens a leaf's value widget in edit mode instead of expanding", func() {
 			model := focusField(composeDeployment(), "apiVersion")
 
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 			Expect(cmd).To(BeNil())
 			Expect(model.Editing()).To(BeTrue(),
@@ -499,9 +499,9 @@ var _ = Describe("the compose view", func() {
 			model = expandField(model, "spec")
 			model = focusField(model, "spec.ghost")
 
-			Expect(model.View()).To(ContainSubstring("expanding this field failed"),
+			Expect(render(model)).To(ContainSubstring("expanding this field failed"),
 				"the $ref-resolution error surfaces in the detail pane, never as a crash")
-			Expect(model.View()).To(ContainSubstring("does not define"),
+			Expect(render(model)).To(ContainSubstring("does not define"),
 				"the error names the dangling $ref's missing component schema")
 
 			before := model.VisibleFieldPaths()
@@ -540,7 +540,7 @@ var _ = Describe("the compose view", func() {
 			model := expandField(widen(openKind(newShell(), kindNamed("Gadget", "v1"))), "spec")
 			model = focusField(model, "spec.profile")
 
-			view := model.View()
+			view := render(model)
 			Expect(view).To(ContainSubstring("type: string"))
 			Expect(view).To(ContainSubstring("default: balanced"),
 				"the schema default renders as a dimmed placeholder, never as a value in the Draft")
@@ -553,7 +553,7 @@ var _ = Describe("the compose view", func() {
 			model := expandField(widen(openKind(newShell(), kindNamed("Gadget", "v1"))), "spec")
 			model = focusField(model, "spec.nickname")
 
-			view := model.View()
+			view := render(model)
 			Expect(view).To(ContainSubstring("pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"))
 			Expect(view).To(ContainSubstring("maxLength: 63"))
 		})
@@ -562,14 +562,14 @@ var _ = Describe("the compose view", func() {
 			model := expandField(widen(openKind(newShell(), kindNamed("Gadget", "v1"))), "spec")
 			model = focusField(model, "spec.maxUnavailable")
 
-			Expect(model.View()).To(ContainSubstring("type: int-or-string"))
+			Expect(render(model)).To(ContainSubstring("type: int-or-string"))
 		})
 
 		It("says the Type Schema can't describe a schema-blind node", func() {
 			model := expandField(widen(openKind(newShell(), kindNamed("Gadget", "v1"))), "spec")
 			model = focusField(model, "spec.tuning")
 
-			Expect(model.View()).To(ContainSubstring("can't describe what goes here"),
+			Expect(render(model)).To(ContainSubstring("can't describe what goes here"),
 				"the raw-YAML escape hatch that composes these lands in M3")
 		})
 
@@ -578,7 +578,7 @@ var _ = Describe("the compose view", func() {
 			model := expandField(widen(openKind(newShell(), palette)), "spec")
 			model = focusField(model, "spec.shade")
 
-			Expect(model.View()).To(ContainSubstring("enum: red · green · blue"))
+			Expect(render(model)).To(ContainSubstring("enum: red · green · blue"))
 		})
 	})
 
@@ -588,14 +588,14 @@ var _ = Describe("the compose view", func() {
 
 			Expect(model.MissingRequiredFieldPaths()).To(Equal([]string{"spec", "spec.size"}),
 				"contextual requiredness over the empty Draft — the root-level required chain")
-			Expect(model.View()).To(ContainSubstring("spec ✱"),
+			Expect(render(model)).To(ContainSubstring("spec ✱"),
 				"the tree pane marks required-but-unset fields")
 
 			model = focusField(model, "spec")
-			Expect(model.View()).To(ContainSubstring("required — unset"))
+			Expect(render(model)).To(ContainSubstring("required — unset"))
 
 			model = expandField(model, "spec")
-			Expect(model.View()).To(ContainSubstring("size ✱"))
+			Expect(render(model)).To(ContainSubstring("size ✱"))
 		})
 
 		It("flags nothing for a Kind whose root Type Schema declares no required fields", func() {
@@ -612,8 +612,8 @@ var _ = Describe("the compose view", func() {
 
 			model, _ = press(model, keyRune('?'))
 			Expect(model.HelpOpen()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("navigate mode"))
-			Expect(model.View()).To(ContainSubstring("return to the Kind picker"),
+			Expect(render(model)).To(ContainSubstring("navigate mode"))
+			Expect(render(model)).To(ContainSubstring("return to the Kind picker"),
 				"the help overlay documents the way back to the picker")
 
 			model, _ = press(model, keyRune('j'))
@@ -627,7 +627,7 @@ var _ = Describe("the compose view", func() {
 			model := composeDeployment()
 
 			model, _ = press(model, keyRune('?'))
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 
 			Expect(model.HelpOpen()).To(BeFalse())
 			Expect(model.ComposeOpen()).To(BeTrue())
@@ -637,7 +637,7 @@ var _ = Describe("the compose view", func() {
 			model := composeDeployment()
 
 			model, _ = press(model, keyRune('?'))
-			_, quit := press(model, tea.KeyMsg{Type: tea.KeyCtrlC})
+			_, quit := press(model, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 
 			Expect(quit).NotTo(BeNil())
 			Expect(quit()).To(Equal(tea.QuitMsg{}))
@@ -646,7 +646,7 @@ var _ = Describe("the compose view", func() {
 
 	When("the compose view is browsed within one Session", func() {
 		It("shows the contextual hint bar for the focused view", func() {
-			view := composeDeployment().View()
+			view := render(composeDeployment())
 
 			Expect(view).To(ContainSubstring("? help"))
 			Expect(view).To(ContainSubstring("q quit"))
@@ -659,7 +659,7 @@ var _ = Describe("the compose view", func() {
 		It("returns to the Kind picker on Esc, keeping the picker browsable", func() {
 			model := composeDeployment()
 
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 			Expect(cmd).NotTo(BeNil())
 			model, _ = press(model, cmd())
 
@@ -678,10 +678,10 @@ var _ = Describe("the compose view", func() {
 			func(size tea.WindowSizeMsg) {
 				model, _ := press(composeDeployment(), size)
 
-				Expect(model.View()).NotTo(BeEmpty())
+				Expect(render(model)).NotTo(BeEmpty())
 
 				model, _ = press(model, keyRune('G'))
-				Expect(model.View()).To(ContainSubstring("status"),
+				Expect(render(model)).To(ContainSubstring("status"),
 					"the tree pane's viewport must follow the focus")
 			},
 			Entry("a few rows tall", tea.WindowSizeMsg{Width: 30, Height: 5}),

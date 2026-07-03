@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -66,7 +66,7 @@ var _ = Describe("the deep-linked Session entry", func() {
 		It("returns to the Kind picker on Esc like any other compose view", func() {
 			model := launchDeepLinked(kindNamed("Deployment", "v1"), "")
 
-			model, back := press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, back := press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 			Expect(back).NotTo(BeNil())
 			model, _ = press(model, back())
 
@@ -111,7 +111,7 @@ var _ = Describe("the deep-linked Session entry", func() {
 			notice, noticed := model.Notice()
 			Expect(noticed).To(BeTrue())
 			Expect(notice).To(ContainSubstring("spec.bogus"), "the notice names the path that doesn't exist")
-			Expect(model.View()).To(ContainSubstring("spec.bogus"),
+			Expect(render(model)).To(ContainSubstring("spec.bogus"),
 				"the notice renders in the TUI, with the Session still running")
 		})
 
@@ -122,7 +122,7 @@ var _ = Describe("the deep-linked Session entry", func() {
 
 			_, noticed := model.Notice()
 			Expect(noticed).To(BeFalse(), "any key acknowledges the notice — browsing has started")
-			Expect(model.View()).To(ContainSubstring("? help"), "the contextual hint bar returns")
+			Expect(render(model)).To(ContainSubstring("? help"), "the contextual hint bar returns")
 			Expect(model.FocusedFieldPath()).To(Equal("apiVersion"),
 				"the acknowledging key still navigates — the notice consumes nothing")
 		})
@@ -148,7 +148,7 @@ var _ = Describe("the deep-linked Session entry", func() {
 			Expect(failed).To(BeTrue())
 			Expect(message).To(ContainSubstring("the cluster hung up mid-fetch"))
 
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 			_, highlighted := model.HighlightedKind()
 			Expect(highlighted).To(BeTrue(), "the picker is the way out of a failed deep link")
 		})

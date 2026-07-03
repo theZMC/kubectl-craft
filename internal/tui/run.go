@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 )
@@ -75,10 +75,11 @@ func Run(
 	}
 	defer func() { _ = tty.Close() }()
 
+	// The alt screen itself is declared by the shell's View — Bubble Tea
+	// v2's declarative replacement for the WithAltScreen program option.
 	program := tea.NewProgram(
 		New(ctx, kinds, fetcher, index, validator, defaultNamespace, link),
 		tea.WithContext(ctx),
-		tea.WithAltScreen(),
 		tea.WithInput(tty),
 		tea.WithOutput(tty),
 	)

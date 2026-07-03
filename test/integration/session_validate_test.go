@@ -6,7 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,14 +28,14 @@ import (
 // accessors, never on internals.
 
 var (
-	enterKey     = tea.KeyMsg{Type: tea.KeyEnter}
-	escKey       = tea.KeyMsg{Type: tea.KeyEsc}
-	backspaceKey = tea.KeyMsg{Type: tea.KeyBackspace}
+	enterKey     = tea.KeyPressMsg{Code: tea.KeyEnter}
+	escKey       = tea.KeyPressMsg{Code: tea.KeyEsc}
+	backspaceKey = tea.KeyPressMsg{Code: tea.KeyBackspace}
 )
 
 // keyRune is one printable navigate-mode key press.
-func keyRune(r rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+func keyRune(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
 }
 
 // press drives the Session shell's Update with synthetic messages, the way
@@ -49,6 +50,13 @@ func press(model tui.Model, msgs ...tea.Msg) (tui.Model, tea.Cmd) {
 		model = updated.(tui.Model)
 	}
 	return model, cmd
+}
+
+// render renders the shell's frame as the plain string the v1 suite saw
+// under its Ascii color profile: lipgloss v2 styles always emit ANSI, so
+// specs that read the model directly strip the styling themselves.
+func render(model tui.Model) string {
+	return ansi.Strip(model.View().Content)
 }
 
 // typeText presses one printable key per rune, the way a user types into a
@@ -295,7 +303,7 @@ spec:
 			"the server's required-field cause must map onto its tree node")
 		Expect(model.ValidateFindingMessages("spec.maxReplicas")).To(ContainElement(ContainSubstring("Required value")))
 		model = dismissResults(model)
-		Expect(model.View()).To(ContainSubstring("maxReplicas ✱ ✘"),
+		Expect(render(model)).To(ContainSubstring("maxReplicas ✱ ✘"),
 			"the finding marker joins the required marker on the omitted row — "+
 				"'the server rejected this' next to 'you haven't filled this'")
 
@@ -321,7 +329,7 @@ spec:
 			ContainSubstring("profile must be economy, balanced, or performance"),
 		))
 		model = dismissResults(model)
-		Expect(model.View()).To(ContainSubstring("profile: turbo ✘"),
+		Expect(render(model)).To(ContainSubstring("profile: turbo ✘"),
 			"the error marker sits on the CEL-violating row, next to its set value")
 
 		By("jumping to the remaining finding and fixing it")
@@ -333,11 +341,11 @@ spec:
 		model = revalidate(model)
 		Expect(model.ValidatePassed()).To(BeTrue(), "the fixed Draft must pass the server's full dry-run")
 		Expect(model.ValidateFindingPaths()).To(BeEmpty())
-		Expect(model.View()).To(ContainSubstring("✔ Validate passed"))
-		Expect(model.View()).NotTo(ContainSubstring("✘"), "a clean pass clears every prior marker")
+		Expect(render(model)).To(ContainSubstring("✔ Validate passed"))
+		Expect(render(model)).NotTo(ContainSubstring("✘"), "a clean pass clears every prior marker")
 
 		By("emitting the clean-pass Manifest and asserting it round-trips")
-		model, emit := press(model, tea.KeyMsg{Type: tea.KeyCtrlD})
+		model, emit := press(model, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 		Expect(emit).NotTo(BeNil())
 		model, _ = press(model, emit())
 		manifest, emitted := model.EmittedManifest()
@@ -406,11 +414,11 @@ var _ = Describe("the Session's Validate when the cluster refuses the dry-run", 
 		Expect(reason).To(ContainSubstring("403"))
 		Expect(reason).To(ContainSubstring("forbidden"),
 			"the reason must carry the server's own words for the results pane")
-		Expect(model.View()).To(ContainSubstring("Validate unavailable"))
-		Expect(model.View()).To(ContainSubstring("says nothing about the Manifest"),
+		Expect(render(model)).To(ContainSubstring("Validate unavailable"))
+		Expect(render(model)).To(ContainSubstring("says nothing about the Manifest"),
 			"unavailability must read as the cluster's failure, never the Manifest's")
 		Expect(model.ValidateFindingPaths()).To(BeEmpty())
-		Expect(model.View()).NotTo(ContainSubstring("✘"), "an unavailable Validate never marks tree nodes")
+		Expect(render(model)).NotTo(ContainSubstring("✘"), "an unavailable Validate never marks tree nodes")
 	}, NodeTimeout(defaultSpecTimeout))
 })
 
@@ -460,9 +468,9 @@ var _ = Describe("the Session's Validate on a webhook denial", func() {
 			"a cause-less denial has no tree position — the results pane carries it")
 		Expect(model.ValidateFindingPaths()).To(BeEmpty(), "the denial names no Field Path to mark")
 		Expect(model.UnmappableFindings()).To(HaveLen(1))
-		Expect(model.View()).To(ContainSubstring("Validate results"))
-		Expect(model.View()).To(ContainSubstring("(HTTP 400)"))
-		Expect(model.View()).To(ContainSubstring("admission webhook"),
+		Expect(render(model)).To(ContainSubstring("Validate results"))
+		Expect(render(model)).To(ContainSubstring("(HTTP 400)"))
+		Expect(render(model)).To(ContainSubstring("admission webhook"),
 			"the denial's own words are what the user needs to see")
 	}, NodeTimeout(defaultSpecTimeout))
 })

@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -115,7 +115,7 @@ var _ = Describe("the manual Validate", func() {
 			validator := &stubValidator{outcome: data.Clean{}}
 			model := composeValidatable(validatingShell(validator, "team-a"), kindNamed("Deployment", "v1"))
 
-			fork, emit := press(model, tea.KeyMsg{Type: tea.KeyCtrlD})
+			fork, emit := press(model, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 			Expect(emit).NotTo(BeNil())
 			fork, _ = press(fork, emit())
 			wantManifest, emitted := fork.EmittedManifest()
@@ -148,8 +148,8 @@ var _ = Describe("the manual Validate", func() {
 			model := composeValidatable(validatingShell(validator, "team-a"), kindNamed("Deployment", "v1"))
 
 			model, post := startValidate(model)
-			Expect(model.View()).To(ContainSubstring("validating the Draft"))
-			Expect(model.View()).To(ContainSubstring("esc/q cancel the Validate"),
+			Expect(render(model)).To(ContainSubstring("validating the Draft"))
+			Expect(render(model)).To(ContainSubstring("esc/q cancel the Validate"),
 				"the in-flight state documents cancelling, in the loading grammar")
 
 			model, _ = press(model, escKey)
@@ -213,21 +213,21 @@ var _ = Describe("the manual Validate", func() {
 		It("flags the required-to-Validate metadata in the status line from session start", func() {
 			model := widen(openKind(validatingShell(&stubValidator{outcome: data.Clean{}}, ""), kindNamed("Deployment", "v1")))
 
-			Expect(model.View()).To(ContainSubstring("Validate needs metadata.name and metadata.namespace"),
+			Expect(render(model)).To(ContainSubstring("Validate needs metadata.name and metadata.namespace"),
 				"a namespaced Kind with no resolvable default needs both, before any v is pressed")
-			Expect(model.View()).To(ContainSubstring("no required fields missing"),
+			Expect(render(model)).To(ContainSubstring("no required fields missing"),
 				"the flag is distinct from the schema-required count — apps/v1 Deployment requires nothing at the root")
 		})
 
 		It("drops the namespace from the flag when the Session default resolves, and the whole flag once satisfied", func() {
 			model := widen(openKind(validatingShell(&stubValidator{outcome: data.Clean{}}, "team-a"), kindNamed("Deployment", "v1")))
-			Expect(model.View()).To(ContainSubstring("Validate needs metadata.name"))
-			Expect(model.View()).NotTo(ContainSubstring("metadata.namespace"))
+			Expect(render(model)).To(ContainSubstring("Validate needs metadata.name"))
+			Expect(render(model)).NotTo(ContainSubstring("metadata.namespace"))
 
 			model = expandField(model, "metadata")
 			model = confirmLeaf(model, "metadata.name", "web")
 
-			Expect(model.View()).NotTo(ContainSubstring("Validate needs"))
+			Expect(render(model)).NotTo(ContainSubstring("Validate needs"))
 		})
 
 		It("prompts inline for metadata.name and confirms it into the Draft at the real Field Path", func() {
@@ -239,7 +239,7 @@ var _ = Describe("the manual Validate", func() {
 			prompted, prompting := model.PromptingForValidateMetadata()
 			Expect(prompting).To(BeTrue())
 			Expect(prompted).To(Equal("metadata.name"))
-			Expect(model.View()).To(ContainSubstring("Validate needs metadata.name >"))
+			Expect(render(model)).To(ContainSubstring("Validate needs metadata.name >"))
 
 			model = typeFilter(model, "web")
 			model, cmd = press(model, enterKey)
@@ -334,7 +334,7 @@ var _ = Describe("the manual Validate", func() {
 			Expect(cmd).To(BeNil())
 			_, prompting := model.PromptingForValidateMetadata()
 			Expect(prompting).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("type a value"))
+			Expect(render(model)).To(ContainSubstring("type a value"))
 		})
 	})
 
@@ -349,16 +349,16 @@ var _ = Describe("the manual Validate", func() {
 				"the mapped findings keep the server's cause order")
 			Expect(model.ResultsPaneOpen()).To(BeFalse(),
 				"with every finding mapped, the tree is the whole story — no pane interrupts")
-			Expect(model.View()).To(ContainSubstring("2 Validate findings"))
+			Expect(render(model)).To(ContainSubstring("2 Validate findings"))
 
 			model, _ = press(model, keyRune('g'))
 			model = expandField(model, "spec")
-			Expect(model.View()).To(ContainSubstring("selector ✘"),
+			Expect(render(model)).To(ContainSubstring("selector ✘"),
 				"the error marker sits on the offending row, distinct from the required marker")
 
 			model = focusField(model, "spec.selector")
 			Expect(model.ValidateFindingMessages("spec.selector")).To(Equal([]string{"Required value"}))
-			Expect(model.View()).To(ContainSubstring("Required value"),
+			Expect(render(model)).To(ContainSubstring("Required value"),
 				"the finding's message renders in the detail pane when the row is focused")
 		})
 
@@ -372,7 +372,7 @@ var _ = Describe("the manual Validate", func() {
 				"spec.containers[0] spells a valid Field Path, but apps/v1 Deployment's tree cannot reach it")
 			Expect(model.ResultsPaneOpen()).To(BeTrue())
 			Expect(model.UnmappableFindings()).To(HaveLen(5))
-			Expect(model.View()).To(ContainSubstring("spec.containers[0].imagePullPolicy — Unsupported value"),
+			Expect(render(model)).To(ContainSubstring("spec.containers[0].imagePullPolicy — Unsupported value"),
 				"the degraded finding keeps the server's raw field spelling as provenance")
 		})
 
@@ -509,11 +509,11 @@ var _ = Describe("the manual Validate", func() {
 			Expect(model.ResultsPaneOpen()).To(BeTrue())
 			Expect(model.ValidateFindingPaths()).To(BeEmpty())
 			Expect(model.UnmappableFindings()).To(HaveLen(1))
-			Expect(model.View()).To(ContainSubstring("Validate results"))
-			Expect(model.View()).To(ContainSubstring("(HTTP 400)"))
-			Expect(model.View()).To(ContainSubstring("admission webhook"),
+			Expect(render(model)).To(ContainSubstring("Validate results"))
+			Expect(render(model)).To(ContainSubstring("(HTTP 400)"))
+			Expect(render(model)).To(ContainSubstring("admission webhook"),
 				"the denial's own words are what the user needs to see")
-			Expect(model.View()).To(ContainSubstring("esc dismiss"))
+			Expect(render(model)).To(ContainSubstring("esc dismiss"))
 		})
 
 		It("renders a 404's Status summary rather than an empty findings list", func() {
@@ -530,8 +530,8 @@ var _ = Describe("the manual Validate", func() {
 			model = validateThrough(model)
 
 			Expect(model.ResultsPaneOpen()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("(HTTP 404)"))
-			Expect(model.View()).To(ContainSubstring(`namespaces "gone" not found`),
+			Expect(render(model)).To(ContainSubstring("(HTTP 404)"))
+			Expect(render(model)).To(ContainSubstring(`namespaces "gone" not found`),
 				"a cause-less Status still explains itself through its summary message")
 		})
 
@@ -569,11 +569,11 @@ var _ = Describe("the manual Validate", func() {
 			reason, unavailable := model.ValidateUnavailable()
 			Expect(unavailable).To(BeTrue())
 			Expect(reason).To(ContainSubstring("HTTP 403"))
-			Expect(model.View()).To(ContainSubstring("Validate unavailable: the cluster refused the dry-run"))
-			Expect(model.View()).To(ContainSubstring("says nothing about the Manifest"),
+			Expect(render(model)).To(ContainSubstring("Validate unavailable: the cluster refused the dry-run"))
+			Expect(render(model)).To(ContainSubstring("says nothing about the Manifest"),
 				"unavailability must read as the cluster's failure, never the Manifest's")
 			Expect(model.ValidateFindingPaths()).To(BeEmpty())
-			Expect(model.View()).NotTo(ContainSubstring("✘"), "an unavailable Validate never marks tree nodes")
+			Expect(render(model)).NotTo(ContainSubstring("✘"), "an unavailable Validate never marks tree nodes")
 		})
 	})
 
@@ -584,15 +584,15 @@ var _ = Describe("the manual Validate", func() {
 			model = validateThrough(model)
 			model, _ = press(model, keyRune('g'))
 			model = expandField(model, "spec")
-			Expect(model.View()).To(ContainSubstring("✘"))
+			Expect(render(model)).To(ContainSubstring("✘"))
 
 			validator.outcome = data.Clean{}
 			model = validateThrough(model)
 
 			Expect(model.ValidatePassed()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("✔ Validate passed"))
+			Expect(render(model)).To(ContainSubstring("✔ Validate passed"))
 			Expect(model.ValidateFindingPaths()).To(BeEmpty())
-			Expect(model.View()).NotTo(ContainSubstring("✘"), "a clean pass clears every prior marker")
+			Expect(render(model)).NotTo(ContainSubstring("✘"), "a clean pass clears every prior marker")
 		})
 	})
 
@@ -608,11 +608,11 @@ var _ = Describe("the manual Validate", func() {
 
 			Expect(model.ValidateStale()).To(BeTrue())
 			Expect(model.ValidateFindingPaths()).To(HaveLen(2), "stale findings keep their markers as a to-do list")
-			Expect(model.View()).To(ContainSubstring("✘"))
-			Expect(model.View()).To(ContainSubstring("stale, v revalidates"))
+			Expect(render(model)).To(ContainSubstring("✘"))
+			Expect(render(model)).To(ContainSubstring("stale, v revalidates"))
 
 			model = focusField(model, "spec.selector")
-			Expect(model.View()).To(ContainSubstring("stale — the Draft changed since this Validate"),
+			Expect(render(model)).To(ContainSubstring("stale — the Draft changed since this Validate"),
 				"the detail pane says why the finding may no longer hold")
 		})
 
@@ -627,7 +627,7 @@ var _ = Describe("the manual Validate", func() {
 			model = confirmLeaf(model, "spec.replicas", "3")
 
 			Expect(model.ValidatePassed()).To(BeFalse())
-			Expect(model.View()).NotTo(ContainSubstring("Validate passed"))
+			Expect(render(model)).NotTo(ContainSubstring("Validate passed"))
 		})
 
 		It("drops findings entirely on a version switch — the paths may not exist anymore", func() {
@@ -645,7 +645,7 @@ var _ = Describe("the manual Validate", func() {
 			Expect(model.Breadcrumb()).To(HavePrefix("craft.example.com/v2 Widget"))
 			Expect(model.ValidateFindingPaths()).To(BeEmpty())
 			Expect(model.ValidateStale()).To(BeFalse())
-			Expect(model.View()).NotTo(ContainSubstring("Validate finding"),
+			Expect(render(model)).NotTo(ContainSubstring("Validate finding"),
 				"the rebuilt compose view starts with no Validate state at all")
 		})
 	})
@@ -654,24 +654,24 @@ var _ = Describe("the manual Validate", func() {
 		It("always spells v, and adds n and r contextually once findings exist", func() {
 			validator := &stubValidator{outcome: data.Invalid{Status: fixtureStatus("deployment_required.json")}}
 			model := composeValidatable(validatingShell(validator, "team-a"), kindNamed("Deployment", "v1"))
-			Expect(model.View()).To(ContainSubstring("v validate"))
-			Expect(model.View()).NotTo(ContainSubstring("n next finding"))
+			Expect(render(model)).To(ContainSubstring("v validate"))
+			Expect(render(model)).NotTo(ContainSubstring("n next finding"))
 
 			model = validateThrough(model)
 
-			Expect(model.View()).To(ContainSubstring("n next finding"))
-			Expect(model.View()).To(ContainSubstring("r results"))
+			Expect(render(model)).To(ContainSubstring("n next finding"))
+			Expect(render(model)).To(ContainSubstring("r results"))
 		})
 
 		It("documents v, n, r, and the marker lifecycle in the ? help overlay", func() {
 			model, _ := press(composeDeployment(), keyRune('?'))
 
 			Expect(model.HelpOpen()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("(server dry-run)"),
+			Expect(render(model)).To(ContainSubstring("(server dry-run)"),
 				"help carries the one allowed dry-run parenthetical — everywhere else speaks Validate")
-			Expect(model.View()).To(ContainSubstring("jump to the first Validate finding"))
-			Expect(model.View()).To(ContainSubstring("results pane"))
-			Expect(model.View()).To(ContainSubstring("marks findings stale"))
+			Expect(render(model)).To(ContainSubstring("jump to the first Validate finding"))
+			Expect(render(model)).To(ContainSubstring("results pane"))
+			Expect(render(model)).To(ContainSubstring("marks findings stale"))
 		})
 	})
 })

@@ -3,7 +3,7 @@ package tui_test
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -47,7 +47,7 @@ func jumpTo(model tui.Model, query, expected string) tui.Model {
 	Expect(ok).To(BeTrue())
 	Expect(highlighted.FieldPath).To(Equal(expected),
 		"the ranking must put the expected match first for %q", query)
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 	Expect(model.SearchOpen()).To(BeFalse(), "Enter selects the match and closes the overlay")
 	return model
 }
@@ -58,16 +58,16 @@ var _ = Describe("the / field-search overlay", func() {
 			model := openSearch(composeDeployment())
 
 			Expect(model.SearchFilter()).To(BeEmpty())
-			Expect(model.View()).To(ContainSubstring("SCHEMA"),
+			Expect(render(model)).To(ContainSubstring("SCHEMA"),
 				"the single M2 scope is spelled out — the DRAFT scope's Tab toggle slots in beside it later")
-			Expect(model.View()).To(ContainSubstring("esc clear/dismiss"),
+			Expect(render(model)).To(ContainSubstring("esc clear/dismiss"),
 				"the overlay carries its own hint line")
-			Expect(model.View()).NotTo(ContainSubstring("esc Kind picker"),
+			Expect(render(model)).NotTo(ContainSubstring("esc Kind picker"),
 				"the navigate-mode hint bar yields to the overlay's")
 		})
 
 		It("advertises / in the compose view's hint bar", func() {
-			Expect(composeDeployment().View()).To(ContainSubstring("/ search"))
+			Expect(render(composeDeployment())).To(ContainSubstring("/ search"))
 		})
 
 		It("offers the Kind's schema-level Field Paths, not the visible rows", func() {
@@ -87,7 +87,7 @@ var _ = Describe("the / field-search overlay", func() {
 		})
 
 		It("still quits immediately on Ctrl-c — the conventional escape hatch reaches through the overlay", func() {
-			_, quit := press(openSearch(composeDeployment()), tea.KeyMsg{Type: tea.KeyCtrlC})
+			_, quit := press(openSearch(composeDeployment()), tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 
 			Expect(quit).NotTo(BeNil())
 			Expect(quit()).To(Equal(tea.QuitMsg{}))
@@ -121,7 +121,7 @@ var _ = Describe("the / field-search overlay", func() {
 			model := typeFilter(openSearch(composeDeployment()), "imgplcy")
 			narrowed := len(model.SearchMatches())
 
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyBackspace})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyBackspace})
 
 			Expect(model.SearchFilter()).To(Equal("imgplc"))
 			Expect(len(model.SearchMatches())).To(BeNumerically(">=", narrowed))
@@ -131,9 +131,9 @@ var _ = Describe("the / field-search overlay", func() {
 			model := typeFilter(openSearch(composeDeployment()), "zzzz")
 
 			Expect(model.SearchMatches()).To(BeEmpty())
-			Expect(model.View()).To(ContainSubstring("no Field Paths match"))
+			Expect(render(model)).To(ContainSubstring("no Field Paths match"))
 
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			Expect(cmd).To(BeNil())
 			Expect(model.SearchOpen()).To(BeTrue())
 			Expect(model.ComposeOpen()).To(BeTrue())
@@ -143,7 +143,7 @@ var _ = Describe("the / field-search overlay", func() {
 	When("the selection moves through the matches", func() {
 		DescribeTable(
 			"movement keys slide the selection and clamp at the edges",
-			func(down, up tea.KeyMsg) {
+			func(down, up tea.KeyPressMsg) {
 				model := openSearch(composeDeployment())
 
 				model, _ = press(model, up)
@@ -156,8 +156,8 @@ var _ = Describe("the / field-search overlay", func() {
 				Expect(highlighted.FieldPath).To(Equal("metadata"),
 					"an empty filter lists the candidates in tree order")
 			},
-			Entry("arrow keys", tea.KeyMsg{Type: tea.KeyDown}, tea.KeyMsg{Type: tea.KeyUp}),
-			Entry("Ctrl-j/k", tea.KeyMsg{Type: tea.KeyCtrlJ}, tea.KeyMsg{Type: tea.KeyCtrlK}),
+			Entry("arrow keys", tea.KeyPressMsg{Code: tea.KeyDown}, tea.KeyPressMsg{Code: tea.KeyUp}),
+			Entry("Ctrl-j/k", tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}, tea.KeyPressMsg{Code: 'k', Mod: tea.ModCtrl}),
 		)
 
 		It("scrolls the match list with the selection in a short terminal", func() {
@@ -165,12 +165,12 @@ var _ = Describe("the / field-search overlay", func() {
 			model = openSearch(model)
 
 			for range 10 {
-				model, _ = press(model, tea.KeyMsg{Type: tea.KeyDown})
+				model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyDown})
 			}
 
 			highlighted, ok := model.HighlightedSearchMatch()
 			Expect(ok).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring(highlighted.FieldPath),
+			Expect(render(model)).To(ContainSubstring(highlighted.FieldPath),
 				"the viewport must follow the selection")
 		})
 	})
@@ -281,12 +281,12 @@ var _ = Describe("the / field-search overlay", func() {
 		It("absorbs the first Esc into clearing the filter; the second returns to navigate mode", func() {
 			model := typeFilter(openSearch(composeDeployment()), "img")
 
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 			Expect(model.SearchOpen()).To(BeTrue(),
 				"Esc with an active filter clears it and keeps the overlay open")
 			Expect(model.SearchFilter()).To(BeEmpty())
 
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEsc})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEsc})
 			Expect(cmd).To(BeNil(), "dismissing the overlay must not leave the compose view")
 			Expect(model.SearchOpen()).To(BeFalse())
 			Expect(model.ComposeOpen()).To(BeTrue())

@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -169,9 +169,9 @@ var _ = Describe("the $EDITOR pop-out", func() {
 
 			Expect(model.Editing()).To(BeTrue(),
 				"the saved content reopens in the raw-YAML text area — nothing typed in $EDITOR is lost")
-			Expect(model.View()).To(ContainSubstring("parsing the raw YAML grafted"),
+			Expect(render(model)).To(ContainSubstring("parsing the raw YAML grafted"),
 				"the rejection renders inline, the same error path an in-TUI confirm takes")
-			Expect(model.View()).To(ContainSubstring("knobs: ["))
+			Expect(render(model)).To(ContainSubstring("knobs: ["))
 			_, filled := model.DraftValueAt("spec.tuning")
 			Expect(filled).To(BeFalse(), "malformed YAML never reaches the Draft")
 			_, statErr := os.Stat(recordedTempFile(pathRecord))
@@ -230,7 +230,7 @@ var _ = Describe("the $EDITOR pop-out", func() {
 		It("documents e in the ? help overlay", func() {
 			model, _ := press(composeGadget(), keyRune('?'))
 
-			Expect(model.View()).To(ContainSubstring("pop a schema-blind subtree out to $EDITOR"))
+			Expect(render(model)).To(ContainSubstring("pop a schema-blind subtree out to $EDITOR"))
 		})
 	})
 })

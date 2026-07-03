@@ -3,7 +3,7 @@ package tui_test
 import (
 	"errors"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	upKey    = tea.KeyMsg{Type: tea.KeyUp}
-	ctrlDKey = tea.KeyMsg{Type: tea.KeyCtrlD}
-	ctrlCKey = tea.KeyMsg{Type: tea.KeyCtrlC}
+	upKey    = tea.KeyPressMsg{Code: tea.KeyUp}
+	ctrlDKey = tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}
+	ctrlCKey = tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
 )
 
 // composedWidget opens craft.example.com/v1 Widget and fills spec.size, so
@@ -90,7 +90,7 @@ var _ = Describe("the exit ramp", func() {
 		It("renders the menu and the completeness status line together", func() {
 			model, _ := press(composedWidget(), keyRune('q'))
 
-			view := model.View()
+			view := render(model)
 			Expect(view).To(ContainSubstring("Emit & quit"))
 			Expect(view).To(ContainSubstring("Discard & quit"))
 			Expect(view).To(ContainSubstring("Cancel"))
@@ -268,7 +268,7 @@ var _ = Describe("the exit ramp", func() {
 		It("names q's three-way menu and Ctrl-d's direct emit", func() {
 			model, _ := press(composedWidget(), keyRune('?'))
 
-			view := model.View()
+			view := render(model)
 			Expect(view).To(ContainSubstring("Emit & quit / Discard & quit / Cancel"))
 			Expect(view).To(ContainSubstring("ctrl+d"))
 		})

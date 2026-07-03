@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 	"github.com/thezmc/kubectl-craft/internal/schema"
@@ -535,7 +535,7 @@ func appendVisibleRows(rows []*treeRow, row *treeRow) []*treeRow {
 // value widget, the confirms and menus — only one body overlay is ever open
 // at a time, because each opens from navigate mode — and the search
 // surfaces; what remains is navigate mode's command map.
-func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
+func (c compose) update(key tea.KeyPressMsg) (compose, tea.Cmd) {
 	if key.String() == "ctrl+c" {
 		// The conventional escape hatch quits immediately from anywhere —
 		// even through the overlays and the exit menu, discarding the
@@ -556,7 +556,7 @@ func (c compose) update(key tea.KeyMsg) (compose, tea.Cmd) {
 // updateOverlay routes one key press into whichever overlay, prompt, or
 // confirm is open, reporting false when none is — navigate mode's command
 // map takes the key instead.
-func (c compose) updateOverlay(key tea.KeyMsg) (compose, tea.Cmd, bool) {
+func (c compose) updateOverlay(key tea.KeyPressMsg) (compose, tea.Cmd, bool) {
 	switch {
 	case c.helpOpen:
 		c.helpOpen = false
@@ -591,9 +591,52 @@ func (c compose) updateOverlay(key tea.KeyMsg) (compose, tea.Cmd, bool) {
 	}
 }
 
+// paste routes pasted text under the same modal grammar update applies to
+// key presses, with v1's semantics: pasting types into whichever text
+// surface is open — a value widget, the key and gate prompts, the search
+// and version filters — and is inert everywhere else, because a paste is
+// never a command (v1 bracketed pastes so they could not match shortcuts).
+// Like any key, a paste acknowledges a non-fatal notice and closes the
+// help overlay.
+func (c compose) paste(content string) compose {
+	c.notice = ""
+	switch {
+	case c.helpOpen:
+		c.helpOpen = false
+		return c
+	case c.editor != nil:
+		edited := c.editor.paste(content)
+		c.editor = &edited
+		return c
+	case c.keyPrompt != nil:
+		prompt := *c.keyPrompt
+		prompt.rejection = ""
+		prompt.input += content
+		c.keyPrompt = &prompt
+		return c
+	case c.gate != nil:
+		prompt := *c.gate
+		prompt.rejection = ""
+		prompt.input += content
+		c.gate = &prompt
+		return c
+	case c.versionList != nil:
+		list := c.versionList.paste(content)
+		c.versionList = &list
+		return c
+	case c.searchOpen:
+		c.search = c.search.paste(content)
+		return c
+	default:
+		// The confirms, menus, the results pane, and navigate mode: a
+		// paste answers no prompt and moves no tree.
+		return c
+	}
+}
+
 // command applies one navigate-mode command key (DESIGN.md — Keybindings:
 // command map); anything outside the map is tree navigation.
-func (c compose) command(key tea.KeyMsg) (compose, tea.Cmd) {
+func (c compose) command(key tea.KeyPressMsg) (compose, tea.Cmd) {
 	switch key.String() {
 	case "q":
 		return c.pressQuit()
@@ -661,7 +704,7 @@ func (c compose) pressEscape() (compose, tea.Cmd) {
 // without mutating, and every other key is the widget's own — navigate keys
 // never move the tree while editing. The raw-YAML text area confirms on
 // Ctrl-s instead of Enter, which types its newlines.
-func (c compose) updateEditor(key tea.KeyMsg) compose {
+func (c compose) updateEditor(key tea.KeyPressMsg) compose {
 	confirm := "enter"
 	if c.editor.kind == editorRawYAML {
 		confirm = "ctrl+s"
@@ -707,7 +750,7 @@ func (c compose) confirmEditor() compose {
 // updateDiscardConfirm applies one key press to Esc's open discard confirm,
 // in the modal grammar: Enter confirms the discard and returns to the Kind
 // picker, Esc keeps composing, and everything else is inert.
-func (c compose) updateDiscardConfirm(key tea.KeyMsg) (compose, tea.Cmd) {
+func (c compose) updateDiscardConfirm(key tea.KeyPressMsg) (compose, tea.Cmd) {
 	switch key.String() {
 	case "enter":
 		c.discardToPicker = false
@@ -743,7 +786,7 @@ type exitMenu struct {
 // grammar: ↑/↓ move the highlight, Enter confirms the highlighted ramp, Esc
 // cancels back to composing, and everything else is inert (Ctrl-c never
 // reaches here — it quits from anywhere first).
-func (c compose) updateExitMenu(key tea.KeyMsg) (compose, tea.Cmd) {
+func (c compose) updateExitMenu(key tea.KeyPressMsg) (compose, tea.Cmd) {
 	menu := *c.exit
 	switch key.String() {
 	case "up", "k":
@@ -900,7 +943,7 @@ func (c compose) appendItem(row *treeRow, collectionPath string) compose {
 // modal grammar: Enter confirms the typed key into the Draft, Esc cancels
 // without touching it, and printable keys type — any typing clears a
 // lingering rejection, which belongs to the confirm it answered.
-func (c compose) updateKeyPrompt(key tea.KeyMsg) compose {
+func (c compose) updateKeyPrompt(key tea.KeyPressMsg) compose {
 	prompt := *c.keyPrompt
 	switch {
 	case key.String() == "esc":
@@ -914,12 +957,12 @@ func (c compose) updateKeyPrompt(key tea.KeyMsg) compose {
 			runes := []rune(prompt.input)
 			prompt.input = string(runes[:len(runes)-1])
 		}
-	case key.Type == tea.KeySpace:
+	case key.Code == tea.KeySpace && !key.Mod.Contains(tea.ModCtrl):
 		prompt.rejection = ""
 		prompt.input += " "
-	case key.Type == tea.KeyRunes && !key.Alt:
+	case key.Text != "" && !key.Mod.Contains(tea.ModAlt):
 		prompt.rejection = ""
-		prompt.input += string(key.Runes)
+		prompt.input += key.Text
 	}
 	c.keyPrompt = &prompt
 	return c
@@ -1011,7 +1054,7 @@ func (c compose) pressUnset() compose {
 // updateUnsetConfirm applies one key press to the open destructive confirm:
 // y/Enter discards the subtree, n/Esc keeps composing, and everything else
 // is inert.
-func (c compose) updateUnsetConfirm(key tea.KeyMsg) compose {
+func (c compose) updateUnsetConfirm(key tea.KeyPressMsg) compose {
 	confirm := *c.unset
 	switch key.String() {
 	case "enter", "y":
@@ -1178,7 +1221,7 @@ func (c compose) openSearch() compose {
 // applies its outcome: dismissal returns to navigate mode; selecting the
 // highlighted match closes the overlay, resets it for the next search, and
 // jumps the tree under the landing rule.
-func (c compose) updateSearch(key tea.KeyMsg) compose {
+func (c compose) updateSearch(key tea.KeyPressMsg) compose {
 	overlay, outcome := c.search.update(key)
 	c.search = overlay
 

@@ -5,7 +5,7 @@ import (
 	"slices"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 	"github.com/thezmc/kubectl-craft/internal/validate"
@@ -176,7 +176,7 @@ func (c compose) requestValidate() (compose, tea.Cmd) {
 // existing prompt grammar: Enter confirms the typed value into the Draft
 // at the real Field Path, Esc cancels the whole Validate, printable keys
 // type — any typing clears a lingering rejection.
-func (c compose) updateGatePrompt(key tea.KeyMsg) (compose, tea.Cmd) {
+func (c compose) updateGatePrompt(key tea.KeyPressMsg) (compose, tea.Cmd) {
 	prompt := *c.gate
 	switch {
 	case key.String() == "esc":
@@ -190,12 +190,12 @@ func (c compose) updateGatePrompt(key tea.KeyMsg) (compose, tea.Cmd) {
 			runes := []rune(prompt.input)
 			prompt.input = string(runes[:len(runes)-1])
 		}
-	case key.Type == tea.KeySpace:
+	case key.Code == tea.KeySpace && !key.Mod.Contains(tea.ModCtrl):
 		prompt.rejection = ""
 		prompt.input += " "
-	case key.Type == tea.KeyRunes && !key.Alt:
+	case key.Text != "" && !key.Mod.Contains(tea.ModAlt):
 		prompt.rejection = ""
-		prompt.input += string(key.Runes)
+		prompt.input += key.Text
 	}
 	c.gate = &prompt
 	return c, nil
@@ -287,7 +287,7 @@ func (c compose) pressResults() compose {
 // updateResultsPane applies one key press to the open results pane, in the
 // modal grammar: Esc dismisses back to navigate mode, and everything else
 // is inert (Ctrl-c never reaches here — it quits from anywhere first).
-func (c compose) updateResultsPane(key tea.KeyMsg) compose {
+func (c compose) updateResultsPane(key tea.KeyPressMsg) compose {
 	if key.String() == "esc" {
 		c.resultsOpen = false
 	}
@@ -604,7 +604,7 @@ func (m Model) validateResolved(msg validateOutcomeMsg) Model {
 // flight: Esc and `q` cancel the wait and return to composing — the Draft
 // untouched, the late outcome dropped as stale — while Ctrl-c remains the
 // immediate escape hatch.
-func (m Model) validateTransitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) validateTransitKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "ctrl+c":
 		return m, tea.Quit

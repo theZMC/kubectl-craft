@@ -1,7 +1,7 @@
 package tui_test
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -9,11 +9,11 @@ import (
 )
 
 var (
-	enterKey     = tea.KeyMsg{Type: tea.KeyEnter}
-	escKey       = tea.KeyMsg{Type: tea.KeyEsc}
-	spaceKey     = tea.KeyMsg{Type: tea.KeySpace}
-	downKey      = tea.KeyMsg{Type: tea.KeyDown}
-	backspaceKey = tea.KeyMsg{Type: tea.KeyBackspace}
+	enterKey     = tea.KeyPressMsg{Code: tea.KeyEnter}
+	escKey       = tea.KeyPressMsg{Code: tea.KeyEsc}
+	spaceKey     = tea.KeyPressMsg{Code: tea.KeySpace, Text: " "}
+	downKey      = tea.KeyPressMsg{Code: tea.KeyDown}
+	backspaceKey = tea.KeyPressMsg{Code: tea.KeyBackspace}
 )
 
 // widen keeps the panes' lines unwrapped so substring assertions on the
@@ -108,8 +108,20 @@ var _ = Describe("edit mode", func() {
 			model := confirmLeaf(composeGadget(), "spec.nickname", "ratchet")
 
 			Expect(draftValue(model, "spec.nickname")).To(Equal("ratchet"))
-			Expect(model.View()).To(ContainSubstring("nickname: ratchet"),
+			Expect(render(model)).To(ContainSubstring("nickname: ratchet"),
 				"a set leaf renders its value on the tree row")
+		})
+
+		It("keeps Ctrl-space inert — it is not a space", func() {
+			model := openWidget(composeGadget(), "spec.nickname")
+			model = typeFilter(model, "rat")
+
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeySpace, Mod: tea.ModCtrl})
+			model = typeFilter(model, "chet")
+			model, _ = press(model, enterKey)
+
+			Expect(draftValue(model, "spec.nickname")).To(Equal("ratchet"),
+				"v1 parsed Ctrl-space as its own inert key, never a typed space")
 		})
 
 		It("rejects a pattern violation inline, committing nothing", func() {
@@ -119,7 +131,7 @@ var _ = Describe("edit mode", func() {
 			model, _ = press(model, enterKey)
 
 			Expect(model.Editing()).To(BeTrue(), "a rejected confirm keeps the widget open")
-			Expect(model.View()).To(ContainSubstring("does not match the Type Schema's pattern"))
+			Expect(render(model)).To(ContainSubstring("does not match the Type Schema's pattern"))
 			_, filled := model.DraftValueAt("spec.nickname")
 			Expect(filled).To(BeFalse(), "a rejected value never reaches the Draft")
 		})
@@ -153,7 +165,7 @@ var _ = Describe("edit mode", func() {
 			model := confirmLeaf(composeGadget(), "spec.teeth", "12")
 
 			Expect(draftValue(model, "spec.teeth")).To(Equal(int64(12)))
-			Expect(model.View()).To(ContainSubstring("teeth: 12"))
+			Expect(render(model)).To(ContainSubstring("teeth: 12"))
 		})
 
 		It("rejects what does not parse before the Draft is ever asked", func() {
@@ -163,7 +175,7 @@ var _ = Describe("edit mode", func() {
 			model, _ = press(model, enterKey)
 
 			Expect(model.Editing()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("is not an integer"))
+			Expect(render(model)).To(ContainSubstring("is not an integer"))
 			_, filled := model.DraftValueAt("spec.teeth")
 			Expect(filled).To(BeFalse())
 		})
@@ -174,7 +186,7 @@ var _ = Describe("edit mode", func() {
 
 			model, _ = press(model, enterKey)
 			Expect(model.Editing()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("not a multiple of"))
+			Expect(render(model)).To(ContainSubstring("not a multiple of"))
 
 			model, _ = press(model, backspaceKey)
 			model = typeFilter(model, "8")
@@ -191,7 +203,7 @@ var _ = Describe("edit mode", func() {
 			model, _ = press(model, enterKey)
 
 			Expect(model.Editing()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("above the Type Schema's maximum"))
+			Expect(render(model)).To(ContainSubstring("above the Type Schema's maximum"))
 
 			model, _ = press(model, backspaceKey, backspaceKey, backspaceKey)
 			model = typeFilter(model, "0.5")
@@ -210,7 +222,7 @@ var _ = Describe("edit mode", func() {
 
 			Expect(model.Editing()).To(BeFalse())
 			Expect(draftValue(model, "spec.paused")).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("paused: true"))
+			Expect(render(model)).To(ContainSubstring("paused: true"))
 		})
 	})
 
@@ -227,7 +239,7 @@ var _ = Describe("edit mode", func() {
 			model, _ = press(model, downKey, enterKey)
 
 			Expect(draftValue(model, "spec.shade")).To(Equal("green"))
-			Expect(model.View()).To(ContainSubstring("shade: green"))
+			Expect(render(model)).To(ContainSubstring("shade: green"))
 		})
 
 		It("keeps printable keys inert — nothing outside the enum can be spelled", func() {
@@ -258,15 +270,15 @@ var _ = Describe("edit mode", func() {
 		It("shows an unset field's schema default as a dimmed placeholder until a value replaces it", func() {
 			model := composeGadget()
 
-			Expect(model.View()).To(ContainSubstring("profile: balanced"),
+			Expect(render(model)).To(ContainSubstring("profile: balanced"),
 				"the schema default renders as a placeholder on the unset row")
 			_, filled := model.DraftValueAt("spec.profile")
 			Expect(filled).To(BeFalse(), "a placeholder is not a value: the Draft stays sparse")
 
 			model = confirmLeaf(model, "spec.profile", "economy")
 
-			Expect(model.View()).To(ContainSubstring("profile: economy"))
-			Expect(model.View()).NotTo(ContainSubstring("profile: balanced"),
+			Expect(render(model)).To(ContainSubstring("profile: economy"))
+			Expect(render(model)).NotTo(ContainSubstring("profile: balanced"),
 				"a set value takes the row over from the placeholder")
 		})
 	})
@@ -276,7 +288,7 @@ var _ = Describe("edit mode", func() {
 			model := widen(openKind(newShell(), widgetKind()))
 
 			Expect(model.MissingRequiredFieldPaths()).To(Equal([]string{"spec", "spec.size"}))
-			Expect(model.View()).To(ContainSubstring("2 required fields missing"))
+			Expect(render(model)).To(ContainSubstring("2 required fields missing"))
 
 			model = expandField(model, "spec")
 			model = confirmLeaf(model, "spec.size", "5")
@@ -284,31 +296,31 @@ var _ = Describe("edit mode", func() {
 			Expect(draftValue(model, "spec.size")).To(Equal(int64(5)))
 			Expect(model.MissingRequiredFieldPaths()).To(BeEmpty(),
 				"setting spec.size instantiates spec implicitly, completing the chain")
-			Expect(model.View()).To(ContainSubstring("no required fields missing"))
-			Expect(model.View()).NotTo(ContainSubstring("✱"),
+			Expect(render(model)).To(ContainSubstring("no required fields missing"))
+			Expect(render(model)).NotTo(ContainSubstring("✱"),
 				"the required-but-unset markers clear with the chain")
 		})
 
 		It("surfaces contextual requiredness as instantiating uncovers it", func() {
 			model := composeGadget()
-			Expect(model.View()).To(ContainSubstring("no required fields missing"),
+			Expect(render(model)).To(ContainSubstring("no required fields missing"),
 				"Gadget's root requires nothing while the Draft is empty")
 
 			model = confirmLeaf(model, "spec.nickname", "ratchet")
 
 			Expect(model.MissingRequiredFieldPaths()).To(Equal([]string{"spec.maxReplicas", "spec.minReplicas"}),
 				"instantiating spec makes its required fields missing — contextual requiredness")
-			Expect(model.View()).To(ContainSubstring("2 required fields missing"))
-			Expect(model.View()).To(ContainSubstring("maxReplicas ✱"))
+			Expect(render(model)).To(ContainSubstring("2 required fields missing"))
+			Expect(render(model)).To(ContainSubstring("maxReplicas ✱"))
 
 			model, _ = press(model, keyRune('g'))
 			model = confirmLeaf(model, "spec.minReplicas", "1")
-			Expect(model.View()).To(ContainSubstring("1 required field missing"))
+			Expect(render(model)).To(ContainSubstring("1 required field missing"))
 
 			model, _ = press(model, keyRune('g'))
 			model = confirmLeaf(model, "spec.maxReplicas", "3")
 			Expect(model.MissingRequiredFieldPaths()).To(BeEmpty())
-			Expect(model.View()).To(ContainSubstring("no required fields missing"))
+			Expect(render(model)).To(ContainSubstring("no required fields missing"))
 		})
 	})
 
@@ -321,7 +333,7 @@ var _ = Describe("edit mode", func() {
 			model, cmd := press(model, escKey)
 			Expect(cmd).To(BeNil(), "a non-empty Draft must not return to the picker unconfirmed")
 			Expect(model.ConfirmingDiscard()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("discard the Draft"))
+			Expect(render(model)).To(ContainSubstring("discard the Draft"))
 
 			model, _ = press(model, keyRune('j'))
 			Expect(model.ConfirmingDiscard()).To(BeTrue(), "only Enter and Esc answer the confirm")

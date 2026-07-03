@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"gopkg.in/yaml.v3"
 
 	"github.com/thezmc/kubectl-craft/internal/schema"
@@ -120,7 +120,7 @@ func newFieldEditor(row *treeRow, path string, meta schema.Metadata, kind editor
 // the caller's business (confirm and cancel); everything else routes by
 // widget flavor, and any key clears a lingering rejection — the message
 // belongs to the confirm it answered.
-func (e fieldEditor) update(key tea.KeyMsg) fieldEditor {
+func (e fieldEditor) update(key tea.KeyPressMsg) fieldEditor {
 	e.rejection = ""
 	switch e.kind {
 	case editorToggle:
@@ -138,8 +138,8 @@ func (e fieldEditor) update(key tea.KeyMsg) fieldEditor {
 // (Ctrl-s is the confirm, the caller's business) and Tab types the two-space
 // indent step — YAML forbids tab indentation, so a literal tab could only
 // ever be a parse rejection. Everything else is the text widget's grammar.
-func (e fieldEditor) updateRawYAML(key tea.KeyMsg) fieldEditor {
-	switch key.Type {
+func (e fieldEditor) updateRawYAML(key tea.KeyPressMsg) fieldEditor {
+	switch key.Code {
 	case tea.KeyEnter:
 		e.input += "\n"
 		return e
@@ -152,27 +152,45 @@ func (e fieldEditor) updateRawYAML(key tea.KeyMsg) fieldEditor {
 }
 
 // updateText types into the text and numeric widgets' buffer: printable keys
-// append, backspace erases one rune, and everything else is inert.
-func (e fieldEditor) updateText(key tea.KeyMsg) fieldEditor {
+// append, backspace erases one rune, and everything else is inert. Ctrl-space
+// is not a space — v1 parsed it as its own inert key — so the space case
+// guards against the ctrl modifier.
+func (e fieldEditor) updateText(key tea.KeyPressMsg) fieldEditor {
 	switch {
 	case key.String() == "backspace":
 		if e.input != "" {
 			runes := []rune(e.input)
 			e.input = string(runes[:len(runes)-1])
 		}
-	case key.Type == tea.KeySpace:
+	case key.Code == tea.KeySpace && !key.Mod.Contains(tea.ModCtrl):
 		e.input += " "
-	case key.Type == tea.KeyRunes && !key.Alt:
-		e.input += string(key.Runes)
+	case key.Text != "" && !key.Mod.Contains(tea.ModAlt):
+		e.input += key.Text
 	}
 	return e
 }
 
+// paste appends pasted text to the typed widgets' buffer, as-is — v1
+// delivered a paste as one rune-key press, so the text and numeric widgets
+// and the raw-YAML text area take the content verbatim, the toggle and the
+// select stay inert, and, like any key, the paste clears a lingering
+// rejection.
+func (e fieldEditor) paste(content string) fieldEditor {
+	e.rejection = ""
+	switch e.kind {
+	case editorToggle, editorSelect:
+		return e
+	default:
+		e.input += content
+		return e
+	}
+}
+
 // updateToggle flips the boolean widget on space and the horizontal keys —
 // a two-state toggle has no direction to move, only a flip.
-func (e fieldEditor) updateToggle(key tea.KeyMsg) fieldEditor {
+func (e fieldEditor) updateToggle(key tea.KeyPressMsg) fieldEditor {
 	switch key.String() {
-	case " ", "left", "right", "h", "l":
+	case "space", "left", "right", "h", "l":
 		e.toggle = !e.toggle
 	}
 	return e
@@ -181,7 +199,7 @@ func (e fieldEditor) updateToggle(key tea.KeyMsg) fieldEditor {
 // updateSelect moves the enum select's highlight with ↑/↓ and Ctrl-j/k,
 // clamping at the list's edges — the admissible values are fixed, so
 // printable keys are inert: nothing outside the enum can be spelled.
-func (e fieldEditor) updateSelect(key tea.KeyMsg) fieldEditor {
+func (e fieldEditor) updateSelect(key tea.KeyPressMsg) fieldEditor {
 	switch key.String() {
 	case "up", "ctrl+k":
 		e.cursor = max(e.cursor-1, 0)

@@ -3,7 +3,7 @@ package tui_test
 import (
 	"context"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -84,7 +84,7 @@ var _ = Describe("the version switch", func() {
 			highlighted, ok := model.HighlightedVersion()
 			Expect(ok).To(BeTrue())
 			Expect(highlighted).To(Equal(widgetV2()))
-			Expect(model.View()).To(ContainSubstring("(Preferred Version)"),
+			Expect(render(model)).To(ContainSubstring("(Preferred Version)"),
 				"the Preferred Version is marked as row metadata")
 		})
 
@@ -168,8 +168,8 @@ var _ = Describe("the version switch", func() {
 			Expect(model.SwitchingVersion()).To(BeTrue())
 			Expect(model.FetchingDocument()).To(BeTrue())
 			Expect(model.Breadcrumb()).To(Equal("craft.example.com/v2 Widget"))
-			Expect(model.View()).To(ContainSubstring("fetching the apis/craft.example.com/v2"))
-			Expect(model.View()).To(ContainSubstring("esc/q cancel the version switch"),
+			Expect(render(model)).To(ContainSubstring("fetching the apis/craft.example.com/v2"))
+			Expect(render(model)).To(ContainSubstring("esc/q cancel the version switch"),
 				"the switch's loading state documents cancelling, not quitting")
 		})
 
@@ -209,9 +209,9 @@ var _ = Describe("the version switch", func() {
 			Expect(report[0].Reason).To(ContainSubstring(`no field "paint"`))
 			Expect(model.Breadcrumb()).To(HavePrefix("craft.example.com/v1 Widget"),
 				"nothing switches until the report is accepted")
-			Expect(model.View()).To(ContainSubstring("would drop these Draft-level Field Paths"))
-			Expect(model.View()).To(ContainSubstring("spec.paint — "))
-			Expect(model.View()).To(ContainSubstring("drop 1 Field Path and switch to craft.example.com/v2 Widget?"))
+			Expect(render(model)).To(ContainSubstring("would drop these Draft-level Field Paths"))
+			Expect(render(model)).To(ContainSubstring("spec.paint — "))
+			Expect(render(model)).To(ContainSubstring("drop 1 Field Path and switch to craft.example.com/v2 Widget?"))
 		})
 
 		It("Enter accepts the drops and commits the switch", func() {
@@ -315,11 +315,11 @@ var _ = Describe("the version switch", func() {
 	When("the hint bar and help document the verb", func() {
 		It("spells V in navigate mode's hint bar and the full-map help", func() {
 			model := composeWidgetV1(corpusFetcher())
-			Expect(model.View()).To(ContainSubstring("V version"))
+			Expect(render(model)).To(ContainSubstring("V version"))
 
 			model, _ = press(model, keyRune('?'))
 			Expect(model.HelpOpen()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("switch the open Kind's version"))
+			Expect(render(model)).To(ContainSubstring("switch the open Kind's version"))
 		})
 	})
 })

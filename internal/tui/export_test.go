@@ -4,7 +4,7 @@ import (
 	"os"
 	"os/exec"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // SwapExecEditor replaces the $EDITOR pop-out's Bubble Tea terminal handoff

@@ -8,6 +8,6 @@
 package dependencies
 
 import (
-	_ "github.com/charmbracelet/bubbles/textinput"
+	_ "charm.land/bubbles/v2/textinput"
 	_ "k8s.io/kube-openapi/pkg/spec3"
 )

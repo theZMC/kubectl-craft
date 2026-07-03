@@ -49,13 +49,13 @@ var _ = Describe("the mutation verbs", func() {
 
 			Expect(model.Breadcrumb()).To(Equal("apps/v1 Deployment › spec.template.spec.containers[0]"),
 				"the breadcrumb spells the Draft-level bracket path")
-			Expect(model.View()).To(ContainSubstring("containers[0]"))
-			Expect(model.View()).To(ContainSubstring("[items]"),
+			Expect(render(model)).To(ContainSubstring("containers[0]"))
+			Expect(render(model)).To(ContainSubstring("[items]"),
 				"the schema-level placeholder row remains for structure browsing")
 			Expect(model.MissingRequiredFieldPaths()).To(Equal([]string{
 				"spec.selector", "spec.template.spec.containers[0].name",
 			}), "adding containers[0] makes its required name contextual — flagged and counted")
-			Expect(model.View()).To(ContainSubstring("2 required fields missing"))
+			Expect(render(model)).To(ContainSubstring("2 required fields missing"))
 		})
 
 		It("appends the next index on the collection node while earlier items keep their state", func() {
@@ -65,7 +65,7 @@ var _ = Describe("the mutation verbs", func() {
 			model, _ = press(model, keyRune('k')) // back up to the collection node
 			model = appendItem(model, "spec.template.spec.containers[1]")
 
-			view := model.View()
+			view := render(model)
 			Expect(view).To(ContainSubstring("containers[1]"))
 			Expect(model.VisibleFieldPaths()).To(ContainElement("spec.template.spec.containers.image"),
 				"containers[0] stays expanded across the append — items are rows of their own")
@@ -80,7 +80,7 @@ var _ = Describe("the mutation verbs", func() {
 			model = confirmLeaf(model, "spec.template.spec.containers.image", "nginx")
 
 			Expect(draftValue(model, "spec.template.spec.containers[0].image")).To(Equal("nginx"))
-			Expect(model.View()).To(ContainSubstring("image: nginx"))
+			Expect(render(model)).To(ContainSubstring("image: nginx"))
 		})
 
 		It("appends a scalar array's item as an editable leaf row", func() {
@@ -93,7 +93,7 @@ var _ = Describe("the mutation verbs", func() {
 			model, _ = press(model, enterKey)
 
 			Expect(draftValue(model, "spec.gears[0]")).To(Equal("high"))
-			Expect(model.View()).To(ContainSubstring("gears[0]: high"))
+			Expect(render(model)).To(ContainSubstring("gears[0]: high"))
 		})
 
 		It("is a no-op with a hint-bar flash on a non-collection node", func() {
@@ -132,8 +132,8 @@ var _ = Describe("the mutation verbs", func() {
 
 			Expect(model.FocusedDraftPath()).To(Equal(`metadata.labels["app"]`))
 			Expect(model.Breadcrumb()).To(Equal(`apps/v1 Deployment › metadata.labels["app"]`))
-			Expect(model.View()).To(ContainSubstring(`labels["app"]`))
-			Expect(model.View()).To(ContainSubstring("[value]"),
+			Expect(render(model)).To(ContainSubstring(`labels["app"]`))
+			Expect(render(model)).To(ContainSubstring("[value]"),
 				"the schema-level placeholder row remains for structure browsing")
 
 			model, _ = press(model, enterKey)
@@ -152,7 +152,7 @@ var _ = Describe("the mutation verbs", func() {
 			model, _ = press(model, escKey)
 
 			Expect(model.PromptingForKey()).To(BeFalse())
-			Expect(model.View()).NotTo(ContainSubstring(`labels["app"]`))
+			Expect(render(model)).NotTo(ContainSubstring(`labels["app"]`))
 			Expect(model.FocusedDraftPath()).To(Equal("metadata.labels"), "the focus stays on the collection")
 		})
 
@@ -167,7 +167,7 @@ var _ = Describe("the mutation verbs", func() {
 			model, _ = press(model, enterKey)
 
 			Expect(model.PromptingForKey()).To(BeTrue(), "a rejected key keeps the prompt open")
-			Expect(model.View()).To(ContainSubstring("already holds"),
+			Expect(render(model)).To(ContainSubstring("already holds"),
 				"the rejection renders inline, naming the duplicate")
 
 			model, _ = press(model, escKey)
@@ -197,7 +197,7 @@ var _ = Describe("the mutation verbs", func() {
 			Expect(model.ConfirmingUnset()).To(BeFalse(), "a set scalar acts instantly")
 			_, filled := model.DraftValueAt("spec.profile")
 			Expect(filled).To(BeFalse(), "unset removes the entry — sparse semantics, never set-to-empty")
-			Expect(model.View()).To(ContainSubstring("profile: balanced"),
+			Expect(render(model)).To(ContainSubstring("profile: balanced"),
 				"the schema default returns as the dimmed placeholder")
 		})
 
@@ -212,7 +212,7 @@ var _ = Describe("the mutation verbs", func() {
 			model, _ = press(model, keyRune('d'))
 
 			Expect(model.ConfirmingUnset()).To(BeTrue())
-			Expect(model.View()).To(ContainSubstring("discard 2 values under spec?"),
+			Expect(render(model)).To(ContainSubstring("discard 2 values under spec?"),
 				"the confirm carries the discard count from the Draft layer")
 
 			model, _ = press(model, keyRune('n'))
@@ -233,7 +233,7 @@ var _ = Describe("the mutation verbs", func() {
 			Expect(model.ConfirmingUnset()).To(BeFalse())
 			_, filled := model.DraftValueAt("spec.template.spec.containers[0].name")
 			Expect(filled).To(BeFalse())
-			Expect(model.View()).NotTo(ContainSubstring("containers[0]"),
+			Expect(render(model)).NotTo(ContainSubstring("containers[0]"),
 				"the instantiated rows go with the values")
 			Expect(model.MissingRequiredFieldPaths()).To(BeEmpty(),
 				"de-instantiating clears the contextual required chain")
@@ -254,13 +254,13 @@ var _ = Describe("the mutation verbs", func() {
 			model, _ = press(model, keyRune('j')) // onto containers[0]
 			Expect(model.FocusedDraftPath()).To(Equal("spec.template.spec.containers[0]"))
 			model, _ = press(model, keyRune('d'))
-			Expect(model.View()).To(ContainSubstring("discard 1 value under spec.template.spec.containers[0]?"))
+			Expect(render(model)).To(ContainSubstring("discard 1 value under spec.template.spec.containers[0]?"))
 			model, _ = press(model, enterKey)
 
 			Expect(draftValue(model, "spec.template.spec.containers[0].name")).To(Equal("two"),
 				"the removed item's old path now addresses its successor — the renumbering contract")
-			Expect(model.View()).To(ContainSubstring("containers[0]"))
-			Expect(model.View()).NotTo(ContainSubstring("containers[1]"),
+			Expect(render(model)).To(ContainSubstring("containers[0]"))
+			Expect(render(model)).NotTo(ContainSubstring("containers[1]"),
 				"the tree renumbers with the Draft")
 			Expect(model.FocusedDraftPath()).To(Equal("spec.template.spec.containers[0]"),
 				"the breadcrumb and focus land on the renumbered successor")
@@ -273,49 +273,49 @@ var _ = Describe("the mutation verbs", func() {
 			model, _ = press(model, keyRune('d'))
 
 			Expect(model.ConfirmingUnset()).To(BeFalse(), "an empty item discards nothing, so no confirm")
-			Expect(model.View()).NotTo(ContainSubstring("containers[0]"))
+			Expect(render(model)).NotTo(ContainSubstring("containers[0]"))
 			Expect(model.MissingRequiredFieldPaths()).NotTo(ContainElement("spec.template.spec.containers[0].name"),
 				"removing the item clears its contextual requiredness")
 		})
 
 		It("is a no-op on a node the Draft holds nothing at", func() {
 			model := focusField(composeGadget(), "spec.profile")
-			before := model.View()
+			before := render(model)
 
 			model, _ = press(model, keyRune('d'))
 
 			Expect(model.ConfirmingUnset()).To(BeFalse())
-			Expect(model.View()).To(Equal(before), "d on an unset node does nothing at all")
+			Expect(render(model)).To(Equal(before), "d on an unset node does nothing at all")
 		})
 	})
 
 	When("the hint bar and help advertise the mutation verbs contextually", func() {
 		It("offers a append item on an array node and a add key on a map node", func() {
 			model := composeContainers()
-			Expect(model.View()).To(ContainSubstring("a append item"))
-			Expect(model.View()).NotTo(ContainSubstring("a add key"))
+			Expect(render(model)).To(ContainSubstring("a append item"))
+			Expect(render(model)).NotTo(ContainSubstring("a add key"))
 
 			model, _ = press(model, keyRune('g')) // focusField only walks down
 			model = focusField(expandField(model, "spec.template.metadata"), "spec.template.metadata.labels")
-			Expect(model.View()).To(ContainSubstring("a add key"))
-			Expect(model.View()).NotTo(ContainSubstring("a append item"))
+			Expect(render(model)).To(ContainSubstring("a add key"))
+			Expect(render(model)).NotTo(ContainSubstring("a append item"))
 		})
 
 		It("offers d unset only where the Draft holds something", func() {
 			model := composeGadget()
 			model = focusField(model, "spec.profile")
-			Expect(model.View()).NotTo(ContainSubstring("d unset"),
+			Expect(render(model)).NotTo(ContainSubstring("d unset"),
 				"nothing is set at spec.profile yet — d would be a no-op")
 
 			model = confirmLeaf(model, "spec.profile", "economy")
-			Expect(model.View()).To(ContainSubstring("d unset"))
+			Expect(render(model)).To(ContainSubstring("d unset"))
 		})
 
 		It("documents a and d in the ? help overlay", func() {
 			model, _ := press(composeDeployment(), keyRune('?'))
 
-			Expect(model.View()).To(ContainSubstring("append an item on an array node"))
-			Expect(model.View()).To(ContainSubstring("unset the focused value"))
+			Expect(render(model)).To(ContainSubstring("append an item on an array node"))
+			Expect(render(model)).To(ContainSubstring("unset the focused value"))
 		})
 	})
 })

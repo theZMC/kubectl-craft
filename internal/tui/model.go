@@ -5,7 +5,7 @@ import (
 	"maps"
 	"slices"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
 	"github.com/thezmc/kubectl-craft/internal/schema"
@@ -226,11 +226,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.picker = m.picker.resize(msg.Height)
 		m.compose = m.compose.resize(msg.Width, msg.Height)
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.PasteMsg:
+		return m.handlePaste(msg), nil
 	default:
 		return m.updateTransition(msg)
 	}
+}
+
+// handlePaste routes pasted text to the open view. Bracketed paste is its
+// own message in Bubble Tea v2 — v1 delivered it as one rune key press —
+// and it keeps v1's semantics: the paste types into whichever text surface
+// is open and is inert everywhere else, a command never among the things a
+// paste can be (v1 bracketed pastes so they could not match shortcuts).
+func (m Model) handlePaste(msg tea.PasteMsg) Model {
+	switch m.view {
+	case pickingKind:
+		m.picker = m.picker.paste(msg.Content)
+	case composing:
+		m.compose = m.compose.paste(msg.Content)
+	}
+	return m
 }
 
 // updateTransition applies one of the Session's typed transition messages:
@@ -396,7 +413,7 @@ func (m Model) returnToPicker() Model {
 }
 
 // handleKey routes one key press to the open view.
-func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch m.view {
 	case pickingKind:
 		var cmd tea.Cmd
@@ -418,7 +435,7 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // rules apply — `q` and Ctrl-c quit immediately, no prompt (DESIGN.md —
 // Exit ramp). A version switch's loading state answers to switchTransitKey
 // instead: its Draft is still composing underneath.
-func (m Model) transitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) transitKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.switching != nil {
 		return m.switchTransitKey(key)
 	}
@@ -431,9 +448,19 @@ func (m Model) transitKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View renders the open view: the Kind picker, the loading or error state
+// View renders the Session shell's frame on the alternate screen buffer.
+// Bubble Tea v2 declares the alt screen here instead of a program option;
+// the clean-stdout contract itself still lives in Run, which points the
+// program at /dev/tty (DESIGN.md — Output).
+func (m Model) View() tea.View {
+	view := tea.NewView(m.render())
+	view.AltScreen = true
+	return view
+}
+
+// render renders the open view: the Kind picker, the loading or error state
 // between picker and compose, or the compose view itself.
-func (m Model) View() string {
+func (m Model) render() string {
 	switch m.view {
 	case pickingKind:
 		return m.picker.view()

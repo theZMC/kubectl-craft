@@ -1,7 +1,7 @@
 package integration_test
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/client-go/tools/clientcmd"
@@ -69,11 +69,11 @@ var _ = Describe("the Session shell against a live k3s cluster", func() {
 			if model.FocusedFieldPath() == "spec" {
 				break
 			}
-			updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")})
+			updated, _ = model.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
 			model = updated.(tui.Model)
 		}
 		Expect(model.FocusedFieldPath()).To(Equal("spec"))
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+		updated, _ = model.Update(tea.KeyPressMsg{Code: 'l', Text: "l"})
 		model = updated.(tui.Model)
 
 		Expect(model.VisibleFieldPaths()).To(ContainElements("spec.replicas", "spec.selector", "spec.template"))

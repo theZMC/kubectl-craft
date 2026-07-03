@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -103,7 +103,7 @@ func landOnGiantPath(model tui.Model, fieldPath string) tui.Model {
 	match, ok := model.HighlightedSearchMatch()
 	Expect(ok).To(BeTrue())
 	Expect(match.FieldPath).To(Equal(fieldPath))
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 	Expect(model.FocusedFieldPath()).To(Equal(fieldPath))
 	return model
 }
@@ -112,10 +112,10 @@ func landOnGiantPath(model tui.Model, fieldPath string) tui.Model {
 // and confirms it into the Draft.
 func fillFocusedLeaf(model tui.Model, value string) tui.Model {
 	GinkgoHelper()
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 	Expect(model.Editing()).To(BeTrue())
 	model = typeFilter(model, value)
-	model, _ = press(model, tea.KeyMsg{Type: tea.KeyEnter})
+	model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 	Expect(model.Editing()).To(BeFalse(), "the typed value must confirm cleanly")
 	return model
 }
@@ -176,12 +176,12 @@ var _ = Describe("the huge-CRD perf pass over the compose view", Label("perf"), 
 		It("sets, recomputes completeness, rebuilds the rows, and renders inside the budget", func() {
 			model := openKind(newGiantShell(), giantKind("v1"))
 			model = landOnGiantPath(model, "spec.grid.sector07.unit03.f04")
-			model, _ = press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, _ = press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			Expect(model.Editing()).To(BeTrue())
 			model = typeFilter(model, "fast")
 
 			var confirmed time.Duration
-			model, confirmed = pressAndRender(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, confirmed = pressAndRender(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			Expect(confirmed).To(BeNumerically("<", mutationBudget),
 				"a confirmed mutation at depth blew its budget")
 
@@ -203,7 +203,7 @@ var _ = Describe("the huge-CRD perf pass over the compose view", Label("perf"), 
 			start := time.Now()
 			model, _ = press(model, keyRune('V'))
 			Expect(model.VersionListOpen()).To(BeTrue())
-			model, cmd := press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd := press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			Expect(cmd).NotTo(BeNil(), "selecting the version must request the switch")
 			model, cmd = press(model, cmd())
 			Expect(cmd).NotTo(BeNil(), "the target group document must fetch lazily")
@@ -213,7 +213,7 @@ var _ = Describe("the huge-CRD perf pass over the compose view", Label("perf"), 
 				"dropping half the grid must open the drop confirm")
 			Expect(model.DropReport()).NotTo(BeEmpty())
 
-			model, cmd = press(model, tea.KeyMsg{Type: tea.KeyEnter})
+			model, cmd = press(model, tea.KeyPressMsg{Code: tea.KeyEnter})
 			Expect(cmd).NotTo(BeNil(), "accepting the drop report must commit the switch")
 			model, _ = press(model, cmd())
 			_ = model.View()
@@ -241,14 +241,14 @@ var _ = Describe("the compose view's render window over the giant", func() {
 			model, _ = press(model, tea.WindowSizeMsg{Width: 120, Height: 24})
 			model = landOnGiantPath(model, giantcrd.DeepSpinePath())
 
-			view := model.View()
+			view := render(model)
 			Expect(strings.Count(view, "\n")).To(BeNumerically("<=", 24),
 				"a 24-line terminal must never receive more than 24 lines")
 			Expect(view).To(ContainSubstring("anchor"),
 				"the landing keeps the focused deep row inside the window")
 
 			model, _ = press(model, keyRune('g'))
-			view = model.View()
+			view = render(model)
 			Expect(view).To(ContainSubstring("spine"),
 				"the top of the tree scrolls back into the window")
 			Expect(view).NotTo(ContainSubstring("anchor"),
@@ -287,7 +287,7 @@ func BenchmarkGiantSearchKeystroke(b *testing.B) {
 		model = pressBench(model, keyRune(r))
 	}
 
-	keys := []tea.Msg{keyRune('0'), tea.KeyMsg{Type: tea.KeyBackspace}}
+	keys := []tea.Msg{keyRune('0'), tea.KeyPressMsg{Code: tea.KeyBackspace}}
 	b.ResetTimer()
 	for iteration := range b.N {
 		model = pressBench(model, keys[iteration%2])
