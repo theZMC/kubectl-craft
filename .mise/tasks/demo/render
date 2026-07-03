@@ -2,10 +2,21 @@
 # [MISE] description="Render demo.gif from demo.tape with vhs against the k3d demo cluster (requires Docker)"
 # [MISE] dir="{{config_root}}"
 # [MISE] depends=["demo:cluster"]
-# [MISE] tools={vhs = "0.11.0", "conda:ttyd" = "1.7.7", ffmpeg = "8.1.2", k3d = "5.9.0", kubectl = "1.36.2"}
+# [MISE] tools={vhs = "0.11.0", "conda:ttyd" = "1.7.7", "github:eugeneware/ffmpeg-static" = { version = "b6.1.1", matching = "ffmpeg-" }, k3d = "5.9.0", kubectl = "1.36.2"}
 #
 # ttyd comes from conda-forge: the aqua/GitHub-release ttyd ships no
 # darwin/arm64 binary, and conda-forge covers every platform vhs runs on.
+#
+# ffmpeg comes from eugeneware/ffmpeg-static: a single self-contained,
+# statically-linked binary per platform (linux + darwin, incl. arm64) pinned
+# to one release tag, so every run downloads the exact same executable with no
+# external shared libraries to drift. conda-forge — the previous source — instead
+# re-resolved ffmpeg's ~138-package closure from live repodata on every run and
+# drifted into a libjxl soname mismatch (libjxl.so.0.11) that broke the render
+# on both linux CI and darwin (#86). `matching` picks the ffmpeg asset (not
+# ffprobe); mise autodetects the os/arch. The build's exact ffmpeg version is
+# incidental — the render only needs the native gif encoder — so the pin
+# targets reproducibility and staticness, not a specific ffmpeg release.
 #
 # Builds the kubectl-craft binary, points KUBECONFIG at the demo cluster,
 # and replays demo.tape in a clean scratch directory so the recorded
