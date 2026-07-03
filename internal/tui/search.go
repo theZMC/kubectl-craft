@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // searchHints is the `/` field-search overlay's own hint line: the overlay
@@ -336,44 +337,48 @@ func fuzzySubsequence(wanted, runes []rune, scratch []int) ([]int, bool) {
 
 // view renders the overlay: the scope-labelled filter prompt and the
 // visible window of ranked matches, the filter's runes highlighted on each.
-// One frame renders each distinct matched rune through the highlight style
-// exactly once — the styled map memoizes the styled form across every row,
-// because lipgloss's per-Render cost across thousands of unbounded rows is
-// exactly what a keystroke's budget cannot afford.
-func (s fieldSearch) view() string {
+// One frame renders each distinct matched rune through the Structure
+// emphasis exactly once — the token resolves once before the loop, and the
+// styled map memoizes each rune's styled form across every row, because
+// lipgloss's per-Render cost across thousands of unbounded rows is exactly
+// what a keystroke's budget cannot afford.
+func (s fieldSearch) view(th theme) string {
 	lines := []string{"search " + s.scope.label() + " > " + s.filter}
 
 	matched := s.matches()
 	if len(matched) == 0 {
-		lines = append(lines, dimmedStyle.Render("no Field Paths match"))
+		lines = append(lines, th.Meta().Render("no Field Paths match"))
 		return strings.Join(lines, "\n")
 	}
 
+	structure := th.Structure()
 	styled := make(map[rune]string)
 	visible := s.visibleRows(len(matched))
 	for index := s.offset; index < min(s.offset+visible, len(matched)); index++ {
-		lines = append(lines, s.renderMatch(matched[index], index == s.cursor, styled))
+		lines = append(lines, s.renderMatch(matched[index], index == s.cursor, structure, styled))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // renderMatch renders one overlay row: the selection cursor and the Field
 // Path with the filter's matched runes highlighted.
-func (fieldSearch) renderMatch(match SearchMatch, selected bool, styled map[rune]string) string {
+func (fieldSearch) renderMatch(match SearchMatch, selected bool, structure lipgloss.Style, styled map[rune]string) string {
 	cursor := "  "
 	if selected {
 		cursor = "> "
 	}
-	return cursor + highlightMatched(match, styled)
+	return cursor + highlightMatched(match, structure, styled)
 }
 
 // highlightMatched renders a match's Field Path with its matched runes in
-// the highlight style — the "why did this row match" cue. The styled map
+// the Structure emphasis — the "why did this row match" cue. The styled map
 // memoizes each rune's styled form for the frame, and the scan walks the
 // Field Path's runes in place rather than decoding them into a slice. The
-// map assumes one style per matched rune per frame: a styling layer that
-// varies the highlight per row or per position must re-key or drop it.
-func highlightMatched(match SearchMatch, styled map[rune]string) string {
+// map assumes one style per matched rune per frame — view resolves the
+// Structure token once and every row renders through that one style — so a
+// styling layer that varies the highlight per row or per position must
+// re-key or drop it.
+func highlightMatched(match SearchMatch, structure lipgloss.Style, styled map[rune]string) string {
 	if len(match.Matched) == 0 {
 		return match.FieldPath
 	}
@@ -385,7 +390,7 @@ func highlightMatched(match SearchMatch, styled map[rune]string) string {
 		if next < len(match.Matched) && match.Matched[next] == index {
 			rendered, ok := styled[r]
 			if !ok {
-				rendered = highlightedStyle.Render(string(r))
+				rendered = structure.Render(string(r))
 				styled[r] = rendered
 			}
 			view.WriteString(rendered)

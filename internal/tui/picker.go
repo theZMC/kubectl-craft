@@ -6,19 +6,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/thezmc/kubectl-craft/internal/data"
-)
-
-var (
-	// dimmedStyle renders row metadata — group/version and short names —
-	// dimmed, so the kind name stays the row's visual anchor (DESIGN.md —
-	// Flow §2: group/version as dimmed row metadata).
-	dimmedStyle = lipgloss.NewStyle().Faint(true)
-
-	// highlightedStyle marks the kind name on the row the selection sits on.
-	highlightedStyle = lipgloss.NewStyle().Bold(true)
 )
 
 // picker is the Kind picker: the fuzzy-filterable flat list of every
@@ -48,6 +37,11 @@ type picker struct {
 	// zero until the first one arrives, which view() treats as
 	// unbounded.
 	height int
+
+	// theme is the Session's resolved palette, stamped by the shell when
+	// the queried terminal background answers; its zero value renders the
+	// dark palette (ADR-0007).
+	theme theme
 }
 
 // newPicker shapes the discovered Kind list into picker rows.
@@ -288,26 +282,27 @@ func (p picker) view() string {
 	}
 
 	if len(matches) == 0 {
-		view.WriteString(dimmedStyle.Render("no Kinds match") + "\n")
+		view.WriteString(p.theme.Meta().Render("no Kinds match") + "\n")
 		return view.String()
 	}
 
 	for i := p.offset; i < min(p.offset+visible, len(matches)); i++ {
-		view.WriteString(renderRow(matches[i], i == p.cursor))
+		view.WriteString(p.renderRow(matches[i], i == p.cursor))
 	}
 
 	return view.String()
 }
 
-// renderRow renders one Kind row: the kind name anchors the row, with the
-// group/version and short names dimmed alongside it.
-func renderRow(kind data.Kind, highlighted bool) string {
+// renderRow renders one Kind row: the kind name anchors the row — the
+// Structure token marking the one the selection sits on — with the
+// group/version and short names as Meta metadata alongside it.
+func (p picker) renderRow(kind data.Kind, highlighted bool) string {
 	indicator := "  "
 	name := kind.GVK.Kind
 
 	if highlighted {
 		indicator = "> "
-		name = highlightedStyle.Render(name)
+		name = p.theme.Structure().Render(name)
 	}
 
 	meta := kind.GVK.GroupVersion().String()
@@ -315,5 +310,5 @@ func renderRow(kind data.Kind, highlighted bool) string {
 		meta += " (" + strings.Join(kind.ShortNames, ", ") + ")"
 	}
 
-	return indicator + name + "  " + dimmedStyle.Render(meta) + "\n"
+	return indicator + name + "  " + p.theme.Meta().Render(meta) + "\n"
 }

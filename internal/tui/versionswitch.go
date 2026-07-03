@@ -229,34 +229,34 @@ func (v versionList) highlighted() (data.Kind, bool) {
 }
 
 // view renders the list: the filter prompt and the visible window of served
-// versions, the Preferred Version marked as dimmed row metadata.
-func (v versionList) view() string {
+// versions, the Preferred Version marked as Meta row metadata.
+func (v versionList) view(th theme) string {
 	lines := []string{"switch version > " + v.filter}
 
 	matched := v.matches()
 	if len(matched) == 0 {
-		lines = append(lines, dimmedStyle.Render("no served versions match"))
+		lines = append(lines, th.Meta().Render("no served versions match"))
 		return strings.Join(lines, "\n")
 	}
 
 	visible := v.visibleRows(len(matched))
 	for index := v.offset; index < min(v.offset+visible, len(matched)); index++ {
-		lines = append(lines, renderVersionRow(matched[index], index == v.cursor))
+		lines = append(lines, renderVersionRow(matched[index], index == v.cursor, th))
 	}
 	return strings.Join(lines, "\n")
 }
 
 // renderVersionRow renders one served-version row: the group/version anchors
-// the row, the Preferred Version marking dimmed alongside it.
-func renderVersionRow(version data.Kind, highlighted bool) string {
+// the row, the Preferred Version marking as Meta metadata alongside it.
+func renderVersionRow(version data.Kind, highlighted bool, th theme) string {
 	cursor := "  "
 	name := version.GVK.GroupVersion().String()
 	if highlighted {
 		cursor = "> "
-		name = highlightedStyle.Render(name)
+		name = th.Structure().Render(name)
 	}
 	if version.Preferred {
-		name += "  " + dimmedStyle.Render("(Preferred Version)")
+		name += "  " + th.Meta().Render("(Preferred Version)")
 	}
 	return cursor + name
 }
@@ -401,6 +401,7 @@ func (m Model) commitVersionSwitch(pending pendingSwitch) Model {
 
 	view.versions = previous.versions
 	view.defaultNamespace = previous.defaultNamespace
+	view.theme = previous.theme
 	if row := previous.focused(); row != nil {
 		view = view.landAfterSwitch(row.node.FieldPath())
 	}

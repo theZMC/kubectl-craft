@@ -7,6 +7,7 @@ ______________________________________________________________________
 - [Concept](#concept)
 - [Flow](#flow)
 - [Keybindings](#keybindings)
+- [Palette](#palette)
 - [Compose lifecycle](#compose-lifecycle)
 - [Data layer](#data-layer)
 - [Stack](#stack)
@@ -129,6 +130,31 @@ substrate; composing is the product. The tool never mutates the cluster
   move the selection, `Enter` selects, `Esc` clears-then-dismisses. Rule of
   thumb: modal command-letters where a view has many verbs; type-to-filter
   inside any dedicated search surface.
+
+## Palette
+
+- **An owned adaptive palette, one color per meaning** (ADR-0007): the TUI's
+  colors are a designed palette we own — light/dark pairs resolved against the
+  terminal's **queried** background (Bubble Tea's background-color query on the
+  program's own I/O, never environment sniffing) — not the terminal's ANSI-16
+  theme. Every color carries exactly one meaning; one meaning surfaces in many
+  places. All tokens resolve through a single theme layer
+  (`internal/tui/theme.go`); no styles inline at render sites. Until the query
+  answers, the dark palette renders — the deterministic default.
+
+  | token       | meaning                                                      | dark          | light         |
+  | ----------- | ------------------------------------------------------------ | ------------- | ------------- |
+  | NeedsFixing | missing required `✱`, Validate finding `✘`, editor rejection | `#e06c75`     | `#c94f4f`     |
+  | Set         | filled values, `✔` all-clear                                 | `#98c379`     | `#4e9a06`     |
+  | Ask         | confirms, unset/gate prompts, pending decisions              | `#e5c07b`     | `#b58900`     |
+  | Structure   | breadcrumb, focused row, overlay borders/titles              | `#61afef`     | `#2472c8`     |
+  | Meta        | hints, defaults, placeholders, row metadata                  | neutral faint | neutral faint |
+
+- **Meta is neutral by design** — the terminal's own faint rendering, no owned
+  hue — so metadata never competes with meaning. Focus emphasis is **bold** and
+  rides the Structure token. The theme's **`Muted()` variant** resolves every
+  token to the Meta treatment: when a floating overlay dims the view beneath it,
+  that dimmed backdrop carries no meaning of its own.
 
 ## Compose lifecycle
 

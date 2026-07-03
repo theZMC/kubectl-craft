@@ -32,3 +32,16 @@ func SwapOpenTTY(fake func() (*os.File, error)) (restore func()) {
 func EmitFailureNotice(err error) string {
 	return emitFailureNotice(err)
 }
+
+// Theme is the owned adaptive palette's theme layer for specs; the zero
+// value is the dark palette, unmuted — exactly what a Session renders
+// before the terminal answers the background query.
+type Theme = theme
+
+// ThemeOf returns the Session shell's resolved palette, so specs can pin
+// the queried-background resolution deterministically: dark and light are
+// injected by driving Update with a tea.BackgroundColorMsg — the same
+// message the terminal's answer arrives as.
+func ThemeOf(m Model) Theme {
+	return m.theme
+}

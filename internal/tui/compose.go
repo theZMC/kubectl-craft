@@ -276,6 +276,11 @@ type compose struct {
 	// (one open at a time, like every other overlay); Esc dismisses it
 	// and `r` reopens it while results exist.
 	resultsOpen bool
+
+	// theme is the Session's resolved palette, stamped by the shell when
+	// the view opens and re-stamped when the queried terminal background
+	// answers; its zero value renders the dark palette (ADR-0007).
+	theme theme
 }
 
 // newCompose grows the compose view for a Kind from its parsed group
@@ -839,14 +844,14 @@ func emitFailureNotice(err error) string {
 // own line, the highlighted one carrying the cursor — the completeness
 // status line keeps rendering beneath it, so "what would I be emitting" and
 // "how complete is it" coexist.
-func (m exitMenu) view() string {
+func (m exitMenu) view(th theme) string {
 	lines := []string{"quit composing — what happens to the Draft?", ""}
 	for index, option := range exitOptions {
 		cursor := "  "
 		name := option.name
 		if index == m.cursor {
 			cursor = "> "
-			name = highlightedStyle.Render(name)
+			name = th.Structure().Render(name)
 		}
 		lines = append(lines, cursor+name+" — "+option.detail)
 	}
@@ -997,15 +1002,15 @@ func (c compose) confirmKeyPrompt() compose {
 }
 
 // viewLines renders the open key prompt for the detail pane.
-func (p keyPrompt) viewLines() []string {
+func (p keyPrompt) viewLines(th theme) []string {
 	lines := []string{
-		highlightedStyle.Render(p.label()),
+		th.Structure().Render(p.label()),
 		"adding a map entry — type its key",
 		"",
 		"> " + p.input + "▏",
 	}
 	if p.rejection != "" {
-		lines = append(lines, "", highlightedStyle.Render(p.rejection))
+		lines = append(lines, "", th.Structure().Render(p.rejection))
 	}
 	return lines
 }
@@ -1513,13 +1518,13 @@ func (c compose) statusLine() string {
 func (c compose) completenessSegment() string {
 	count := len(c.missing)
 	if count == 0 {
-		return dimmedStyle.Render("✔ no required fields missing")
+		return c.theme.Meta().Render("✔ no required fields missing")
 	}
 	noun := "fields"
 	if count == 1 {
 		noun = "field"
 	}
-	return highlightedStyle.Render(fmt.Sprintf("%s %d required %s missing", requiredMarker, count, noun))
+	return c.theme.Structure().Render(fmt.Sprintf("%s %d required %s missing", requiredMarker, count, noun))
 }
 
 // footer is the view's bottom line: an open confirm — the destructive
@@ -1527,21 +1532,21 @@ func (c compose) completenessSegment() string {
 // press, the contextual hint bar otherwise.
 func (c compose) footer() string {
 	if c.unset != nil {
-		return highlightedStyle.Render(c.unset.prompt())
+		return c.theme.Structure().Render(c.unset.prompt())
 	}
 	if c.gate != nil {
-		return highlightedStyle.Render(c.gate.prompt())
+		return c.theme.Structure().Render(c.gate.prompt())
 	}
 	if c.pendingSwitch != nil {
-		return highlightedStyle.Render(c.pendingSwitch.prompt())
+		return c.theme.Structure().Render(c.pendingSwitch.prompt())
 	}
 	if c.discardToPicker {
-		return highlightedStyle.Render(discardToPickerPrompt)
+		return c.theme.Structure().Render(discardToPickerPrompt)
 	}
 	if c.notice != "" {
-		return highlightedStyle.Render(c.notice)
+		return c.theme.Structure().Render(c.notice)
 	}
-	return dimmedStyle.Render(c.hints())
+	return c.theme.Meta().Render(c.hints())
 }
 
 // hints is the contextual one-line hint bar: the open value widget's own
@@ -1613,7 +1618,7 @@ func (c compose) bodyView() string {
 		return limitLines(helpText, c.bodyHeight())
 	}
 	if c.exit != nil {
-		return limitLines(c.exit.view(), c.bodyHeight())
+		return limitLines(c.exit.view(c.theme), c.bodyHeight())
 	}
 	if c.resultsOpen {
 		return limitLines(clipLines(c.resultsView(), c.width), c.bodyHeight())
@@ -1622,7 +1627,7 @@ func (c compose) bodyView() string {
 		return limitLines(clipLines(c.pendingSwitch.view(), c.width), c.bodyHeight())
 	}
 	if c.versionList != nil {
-		return limitLines(clipLines(c.versionList.view(), c.width), c.bodyHeight())
+		return limitLines(clipLines(c.versionList.view(c.theme), c.width), c.bodyHeight())
 	}
 	if c.searchOpen {
 		return limitLines(c.searchView(), c.bodyHeight())
@@ -1645,7 +1650,7 @@ func (c compose) bodyView() string {
 // searchView renders the search overlay's lines, each clipped to the
 // terminal width.
 func (c compose) searchView() string {
-	return clipLines(c.search.view(), c.width)
+	return clipLines(c.search.view(c.theme), c.width)
 }
 
 // clipLines clips every line of rendered text to the given width,
@@ -1695,7 +1700,7 @@ func (c compose) renderTreeRow(index int) string {
 
 	label := row.label
 	if index == c.cursor {
-		label = highlightedStyle.Render(label)
+		label = c.theme.Structure().Render(label)
 	}
 	label += c.rowValue(row)
 	if c.rowMissingRequired(row) {
@@ -1730,7 +1735,7 @@ func (c compose) rowValue(row *treeRow) string {
 	if err != nil || meta.Default == nil {
 		return ""
 	}
-	return dimmedStyle.Render(": " + renderScalar(meta.Default))
+	return c.theme.Meta().Render(": " + renderScalar(meta.Default))
 }
 
 // draftRowValue spells the value the Draft holds at the row, when one is
@@ -1769,20 +1774,20 @@ func (c compose) detailLines() []string {
 		return nil
 	}
 	if c.editor != nil {
-		return c.editor.viewLines()
+		return c.editor.viewLines(c.theme)
 	}
 	if c.keyPrompt != nil {
-		return c.keyPrompt.viewLines()
+		return c.keyPrompt.viewLines(c.theme)
 	}
 	if row.expandErr != nil {
-		return []string{highlightedStyle.Render(row.label), "", "expanding this field failed: " + row.expandErr.Error()}
+		return []string{c.theme.Structure().Render(row.label), "", "expanding this field failed: " + row.expandErr.Error()}
 	}
 
 	meta, err := row.node.Metadata()
 	if err != nil {
-		return []string{highlightedStyle.Render(row.label), "", "reading this field's Type Schema failed: " + err.Error()}
+		return []string{c.theme.Structure().Render(row.label), "", "reading this field's Type Schema failed: " + err.Error()}
 	}
-	lines := append(metadataLines(row, meta, c.rowMissingRequired(row)), c.graftDetailLines(row)...)
+	lines := append(metadataLines(row, meta, c.rowMissingRequired(row), c.theme), c.graftDetailLines(row)...)
 	return append(lines, c.findingDetailLines(row)...)
 }
 
@@ -1807,8 +1812,8 @@ func (c compose) graftDetailLines(row *treeRow) []string {
 // (DESIGN.md — Flow §6: defaults render dimmed, never in the output), enum
 // values, constraints (CEL text included), the schema-blind note, and the
 // field's documentation.
-func metadataLines(row *treeRow, meta schema.Metadata, missingRequired bool) []string {
-	lines := []string{highlightedStyle.Render(row.label), "type: " + meta.Type}
+func metadataLines(row *treeRow, meta schema.Metadata, missingRequired bool, th theme) []string {
+	lines := []string{th.Structure().Render(row.label), "type: " + meta.Type}
 
 	if meta.Required {
 		flag := "required"
@@ -1818,7 +1823,7 @@ func metadataLines(row *treeRow, meta schema.Metadata, missingRequired bool) []s
 		lines = append(lines, flag)
 	}
 	if meta.Default != nil {
-		lines = append(lines, dimmedStyle.Render("default: "+renderScalar(meta.Default)))
+		lines = append(lines, th.Meta().Render("default: "+renderScalar(meta.Default)))
 	}
 	if len(meta.Enum) > 0 {
 		lines = append(lines, "enum: "+strings.Join(meta.Enum, " · "))

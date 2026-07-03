@@ -308,21 +308,21 @@ func (e fieldEditor) hints() string {
 // viewLines renders the open widget for the detail pane: the field, the
 // widget itself, and the inline rejection when the last confirm was turned
 // away.
-func (e fieldEditor) viewLines() []string {
+func (e fieldEditor) viewLines(th theme) []string {
 	editing := "editing — " + e.meta.Type
 	if e.kind == editorRawYAML {
 		editing = "composing raw YAML — the Type Schema is blind here"
 	}
-	lines := []string{highlightedStyle.Render(e.row.label), editing, ""}
-	lines = append(lines, e.widgetLines()...)
+	lines := []string{th.Structure().Render(e.row.label), editing, ""}
+	lines = append(lines, e.widgetLines(th)...)
 	if e.rejection != "" {
-		lines = append(lines, "", highlightedStyle.Render(e.rejection))
+		lines = append(lines, "", th.Structure().Render(e.rejection))
 	}
 	return lines
 }
 
 // widgetLines renders the widget's body by flavor.
-func (e fieldEditor) widgetLines() []string {
+func (e fieldEditor) widgetLines(th theme) []string {
 	switch e.kind {
 	case editorToggle:
 		return []string{radioLine(e.toggle)}
@@ -332,7 +332,7 @@ func (e fieldEditor) widgetLines() []string {
 			cursor := "  "
 			if index == e.cursor {
 				cursor = "> "
-				value = highlightedStyle.Render(value)
+				value = th.Structure().Render(value)
 			}
 			lines = append(lines, cursor+value)
 		}

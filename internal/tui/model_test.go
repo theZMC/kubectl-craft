@@ -126,8 +126,12 @@ func kindNames(kinds []data.Kind) []string {
 
 var _ = Describe("the Session shell", func() {
 	When("the Session opens on the Kind picker", func() {
-		It("starts with no initial command — Kinds are discovered before launch", func() {
-			Expect(newShell().Init()).To(BeNil())
+		It("starts by querying the terminal background — the owned palette resolves against it, and nothing else is awaited", func() {
+			start := newShell().Init()
+
+			Expect(start).NotTo(BeNil())
+			Expect(start()).To(Equal(tea.RequestBackgroundColor()),
+				"Kinds are discovered before launch — the background query is the only start-up command")
 		})
 
 		It("lists every browsable Kind with each Kind's versions together, Preferred Version first", func() {

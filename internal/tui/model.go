@@ -157,6 +157,13 @@ type Model struct {
 	emitted  bool
 	manifest []byte
 
+	// theme is the Session's resolved palette (ADR-0007): the dark
+	// palette until the terminal answers Init's background query, then
+	// re-resolved against the answer and stamped onto views as they open
+	// — light/dark comes from the program's own I/O, never environment
+	// sniffing.
+	theme theme
+
 	// width and height are the terminal size from the last
 	// tea.WindowSizeMsg, replayed onto views as they open.
 	width  int
@@ -204,16 +211,17 @@ func New(
 	return model
 }
 
-// Init starts the Session shell. Launching on the picker awaits nothing —
-// the live index and the browsable Kind list are both resolved before the
-// program starts. A deep-linked Session instead starts in the loading
-// state, fetching the linked Kind's group document exactly as a picker
-// selection would.
+// Init starts the Session shell by querying the terminal background the
+// owned palette resolves against (ADR-0007) — the answer arrives as a
+// tea.BackgroundColorMsg through Update. Nothing else is awaited on the
+// picker: the live index and the browsable Kind list are both resolved
+// before the program starts. A deep-linked Session also starts the linked
+// Kind's group-document fetch, exactly as a picker selection would.
 func (m Model) Init() tea.Cmd {
 	if m.view == fetchingDocument {
-		return m.fetchDocumentCmd(m.kind)
+		return tea.Batch(tea.RequestBackgroundColor, m.fetchDocumentCmd(m.kind))
 	}
-	return nil
+	return tea.RequestBackgroundColor
 }
 
 // Update applies one message to the Session shell: the terminal size and
@@ -230,9 +238,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKey(msg)
 	case tea.PasteMsg:
 		return m.handlePaste(msg), nil
+	case tea.BackgroundColorMsg:
+		return m.resolveTheme(msg), nil
 	default:
 		return m.updateTransition(msg)
 	}
+}
+
+// resolveTheme re-resolves the owned palette against the queried terminal
+// background — the answer to Init's RequestBackgroundColor — and stamps it
+// onto the open views; a view opened later picks it up from the shell.
+func (m Model) resolveTheme(msg tea.BackgroundColorMsg) Model {
+	m.theme = m.theme.withBackground(msg.IsDark())
+	m.picker.theme = m.theme
+	m.compose.theme = m.theme
+	return m
 }
 
 // handlePaste routes pasted text to the open view. Bracketed paste is its
@@ -387,6 +407,7 @@ func (m Model) openCompose(document *schema.Document) Model {
 
 	view.versions = m.kindVersions(m.kind)
 	view.defaultNamespace = m.defaultNamespace
+	view.theme = m.theme
 	if m.pendingFieldPath != "" {
 		view = view.landDeepLink(m.pendingFieldPath)
 		m.pendingFieldPath = ""
@@ -490,7 +511,7 @@ func (m Model) transitView(body string) string {
 	}
 	return clipLine(kindDisplayName(m.transitKind()), m.width) + "\n\n" +
 		clipLine(body, m.width) + "\n\n" +
-		clipLine(dimmedStyle.Render(hints), m.width) + "\n"
+		clipLine(m.theme.Meta().Render(hints), m.width) + "\n"
 }
 
 // transitKind is the Kind a loading or error state is about: the version

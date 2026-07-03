@@ -27,15 +27,31 @@ func deepLinkedShell(kind data.Kind, fieldPath string) tui.Model {
 	)
 }
 
-// launchDeepLinked drives a deep-linked shell through its Init command —
-// the linked Kind's lazy group-document fetch — the way the Bubble Tea
-// runtime would.
+// launchDeepLinked drives a deep-linked shell through its Init commands —
+// the background query batched with the linked Kind's lazy group-document
+// fetch — the way the Bubble Tea runtime would.
 func launchDeepLinked(kind data.Kind, fieldPath string) tui.Model {
 	GinkgoHelper()
 	model := deepLinkedShell(kind, fieldPath)
-	fetch := model.Init()
-	Expect(fetch).NotTo(BeNil(), "a deep-linked Session must start by fetching the linked Kind's group document")
-	model, _ = press(model, fetch())
+	start := model.Init()
+	Expect(start).NotTo(BeNil(), "a deep-linked Session must start by fetching the linked Kind's group document")
+	return runInit(model, start)
+}
+
+// runInit runs one Init command the way the runtime would: a batch's
+// members run in turn, and the program-level background query passes
+// through Update inertly — its answer, when a terminal gives one, arrives
+// later as a tea.BackgroundColorMsg.
+func runInit(model tui.Model, cmd tea.Cmd) tui.Model {
+	GinkgoHelper()
+	msg := cmd()
+	if batch, isBatch := msg.(tea.BatchMsg); isBatch {
+		for _, member := range batch {
+			model = runInit(model, member)
+		}
+		return model
+	}
+	model, _ = press(model, msg)
 	return model
 }
 
@@ -140,9 +156,9 @@ var _ = Describe("the deep-linked Session entry", func() {
 				"",
 				&tui.DeepLink{Kind: kindNamed("Deployment", "v1")},
 			)
-			fetch := model.Init()
-			Expect(fetch).NotTo(BeNil())
-			model, _ = press(model, fetch())
+			start := model.Init()
+			Expect(start).NotTo(BeNil())
+			model = runInit(model, start)
 
 			message, failed := model.ComposeError()
 			Expect(failed).To(BeTrue())

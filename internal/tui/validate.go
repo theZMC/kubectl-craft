@@ -435,7 +435,7 @@ func (c compose) findingDetailLines(row *treeRow) []string {
 	if c.validation.stale {
 		header += " (stale — the Draft changed since this Validate)"
 	}
-	lines := []string{"", highlightedStyle.Render(header + ":")}
+	lines := []string{"", c.theme.Structure().Render(header + ":")}
 	for _, message := range messages {
 		lines = append(lines, "  "+message)
 	}
@@ -450,7 +450,7 @@ func (c compose) validateGateSegment() string {
 	if len(missing) == 0 {
 		return ""
 	}
-	return highlightedStyle.Render("Validate needs " + strings.Join(missing, " and "))
+	return c.theme.Structure().Render("Validate needs " + strings.Join(missing, " and "))
 }
 
 // validateStateSegment is the status line's Validate half: the clean
@@ -463,12 +463,12 @@ func (c compose) validateStateSegment() string {
 	case state == nil, state.unavailable != "":
 		return ""
 	case state.clean:
-		return dimmedStyle.Render("✔ Validate passed")
+		return c.theme.Meta().Render("✔ Validate passed")
 	case state.stale:
-		return highlightedStyle.Render(fmt.Sprintf("%s %d Validate %s — stale, v revalidates",
+		return c.theme.Structure().Render(fmt.Sprintf("%s %d Validate %s — stale, v revalidates",
 			findingMarker, state.findingCount(), findingNoun(state.findingCount())))
 	default:
-		return highlightedStyle.Render(fmt.Sprintf("%s %d Validate %s",
+		return c.theme.Structure().Render(fmt.Sprintf("%s %d Validate %s",
 			findingMarker, state.findingCount(), findingNoun(state.findingCount())))
 	}
 }
@@ -501,19 +501,19 @@ func (c compose) resultsView() string {
 	}
 	if state.unavailable != "" {
 		return strings.Join([]string{
-			highlightedStyle.Render("Validate unavailable: " + state.unavailable),
+			c.theme.Structure().Render("Validate unavailable: " + state.unavailable),
 			"",
-			dimmedStyle.Render("The cluster could not run the Validate — this says nothing " +
+			c.theme.Meta().Render("The cluster could not run the Validate — this says nothing " +
 				"about the Manifest, and no tree node is marked."),
 		}, "\n")
 	}
 
 	lines := []string{
-		highlightedStyle.Render("Validate results — the server rejected the Manifest"),
+		c.theme.Structure().Render("Validate results — the server rejected the Manifest"),
 		summaryLine(state.summary),
 	}
 	if state.stale {
-		lines = append(lines, dimmedStyle.Render("stale — the Draft changed since this Validate; v revalidates"))
+		lines = append(lines, c.theme.Meta().Render("stale — the Draft changed since this Validate; v revalidates"))
 	}
 	if len(state.unmappable) > 0 {
 		lines = append(lines, "", "findings without a tree position:")
@@ -522,7 +522,7 @@ func (c compose) resultsView() string {
 		}
 	}
 	if len(state.mapped) > 0 {
-		lines = append(lines, "", dimmedStyle.Render(fmt.Sprintf(
+		lines = append(lines, "", c.theme.Meta().Render(fmt.Sprintf(
 			"%d mapped %s mark their tree nodes — n jumps through them",
 			len(state.mapped), findingNoun(len(state.mapped)),
 		)))
