@@ -1,0 +1,30 @@
+[1;38;2;36;114;200mcraft.example.com/v1 Gadget › spec.nickname[m
+  ▾ Gadget                                [2mnickname[m
+      apiVersion                          [2mtype:[m string
+      kind                                constraints:
+    ▸ metadata                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+    ▾ spec                                  minLength: 1
+        efficiency                          maxLength: 63
+      ▸ gears
+        maxReplicas [2m✱[m                     [2mdocumentation[m
+        maxUnavailable                    Human-friendly gadget nickname, DNS-label style.
+        minReplicas [2m✱[m
+>       [2mnickname[m: [2mratchet[m  [38;2;36;114;200;1m┌─ quit ─────────────────────────────────────┐[m
+        profile[2m: balanced[m  [38;2;36;114;200;1m│[38;2;181;137;0;22mquit composing — what happens to the Draft?[m [38;2;36;114;200;1m│[m
+        teeth              [38;2;36;114;200;1m│[m                                            [38;2;36;114;200;1m│[m
+        tuning             [38;2;36;114;200;1m│[m> [38;2;36;114;200;1mEmit & quit[m — emit the Manifest to stdout [38;2;36;114;200;1m│[m
+                           [38;2;36;114;200;1m│[m  Discard & quit — quit with nothing emitted[38;2;36;114;200;1m│[m
+                           [38;2;36;114;200;1m│[m  Cancel — keep composing                   [38;2;36;114;200;1m│[m
+                           [38;2;36;114;200;1m└────────────────────────────────────────────┘[m
+
+
+
+
+
+
+
+
+
+
+[7;38;2;201;79;79m✱ 2 required fields missing[m[7m   [m[7;38;2;181;137;0mValidate needs metadata.name and metadata.namespace[m[7m                   [m
+[7;2m↑/↓ choose · enter confirm · esc cancel[m[7m                                                             [m

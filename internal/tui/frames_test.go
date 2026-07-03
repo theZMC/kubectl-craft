@@ -146,6 +146,38 @@ func startColoredSession(background color.Color) *goldenSession {
 	return newGoldenSession(session)
 }
 
+// startColoredOverlaySession runs the Session shell like startColoredSession
+// but with a clean Validator: the colored overlay goldens pin a floating
+// overlay over the Muted() panes, not a Validate outcome, so the frame stays
+// about the compositor — the Structure box border and title over the tree's
+// faint Meta backdrop, once per palette half.
+func startColoredOverlaySession(background color.Color) *goldenSession {
+	GinkgoHelper()
+	shell := tui.New(context.Background(), browsableKinds(), corpusFetcher(), corpusIndex(),
+		&stubValidator{outcome: data.Clean{}}, "", &tui.DeepLink{Kind: kindNamed("Gadget", "v1")})
+	session := teatest.NewTestModel(GinkgoTB(), shell,
+		teatest.WithInitialTermSize(goldenWidth, goldenHeight),
+		teatest.WithProgramOptions(tea.WithColorProfile(colorprofile.TrueColor)))
+	session.Send(tea.BackgroundColorMsg{Color: background})
+	return newGoldenSession(session)
+}
+
+// composeExitMenuOverlay drives the colored Session to the exit menu floating
+// over the muted compose view: a value confirms into the Draft so `q` opens
+// the three-way menu, and the menu composites as a Structure-bordered box
+// over the panes rendered through the theme's Muted() variant. The awaits
+// gate only the async fetch boundary; every key in between transitions
+// synchronously in Update.
+func composeExitMenuOverlay(session *goldenSession) {
+	GinkgoHelper()
+	awaitRender(session, "apiVersion") // the deep link's fetch has landed on the compose view
+
+	searchLand(session, "nickname")
+	confirmFocusedLeaf(session, "ratchet")
+	session.Send(keyRune('q'))
+	awaitRender(session, "Emit & quit") // the exit menu has floated open
+}
+
 // composeMixedState drives the colored Session to the one mixed-state frame
 // the colored goldens pin: a set value (Set), missing required markers
 // (NeedsFixing), a mapped Validate finding — stale, still NeedsFixing —
@@ -289,6 +321,36 @@ var _ = Describe("the colored golden frames", func() {
 
 			Expect(finalColoredFrame(session)).To(
 				matchers.MatchGoldenFrame("testdata/golden/compose_mixed_truecolor_light.golden"),
+			)
+		})
+	})
+})
+
+var _ = Describe("the floating overlay golden frames", func() {
+	// The floating-overlay tripwire (#77): one open overlay composited over
+	// the Muted() panes, pinned with its ANSI styling at truecolor, once per
+	// palette half. The ASCII exit_menu golden proves the box's glyphs and
+	// layout; these prove the paint — the Structure border and title over the
+	// tree's faint Meta backdrop — so a background that fails to mute, or a
+	// border that loses Structure, fails byte-for-byte.
+	When("the exit menu floats over the muted compose view on dark", func() {
+		It("pins the Structure-bordered box over the faint panes on the dark palette", func() {
+			session := startColoredOverlaySession(lipgloss.Color("#1e1e1e"))
+			composeExitMenuOverlay(session)
+
+			Expect(finalColoredFrame(session)).To(
+				matchers.MatchGoldenFrame("testdata/golden/overlay_exit_truecolor_dark.golden"),
+			)
+		})
+	})
+
+	When("the exit menu floats over the muted compose view on light", func() {
+		It("pins the Structure-bordered box over the faint panes on the light palette", func() {
+			session := startColoredOverlaySession(lipgloss.Color("#ffffff"))
+			composeExitMenuOverlay(session)
+
+			Expect(finalColoredFrame(session)).To(
+				matchers.MatchGoldenFrame("testdata/golden/overlay_exit_truecolor_light.golden"),
 			)
 		})
 	})

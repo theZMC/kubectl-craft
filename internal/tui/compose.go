@@ -1243,12 +1243,14 @@ func (c compose) updateSearch(key tea.KeyPressMsg) compose {
 }
 
 // searchListHeight is how many match rows fit under the search overlay's
-// prompt line; zero means unbounded (no tea.WindowSizeMsg yet).
+// prompt line, inside its floating box: the body height less the prompt line
+// and the box's top and bottom edges. Zero means unbounded (no
+// tea.WindowSizeMsg yet).
 func (c compose) searchListHeight() int {
 	if c.bodyHeight() <= 0 {
 		return 0
 	}
-	return max(c.bodyHeight()-1, 1)
+	return max(c.bodyHeight()-3, 1)
 }
 
 // navigate applies one tree-navigation key.
@@ -1662,29 +1664,82 @@ func (c compose) rowVerbs(row *treeRow, path string) string {
 	return verbs
 }
 
-// bodyView renders the pane area: the `?` help overlay, the exit menu, or
-// the `/` search overlay when one is open, the tree and detail panes
-// otherwise.
+// bodyView renders the pane area: the tree and detail panes with no overlay
+// open, or a floating overlay composited over the muted panes while one is
+// (floatOverlay).
 func (c compose) bodyView() string {
-	if c.helpOpen {
-		return limitLines(helpText, c.bodyHeight())
+	if title, content, open := c.overlayContent(); open {
+		return c.floatOverlay(title, content)
 	}
-	if c.exit != nil {
-		return limitLines(c.exit.view(c.theme), c.bodyHeight())
+	return c.panesView()
+}
+
+// overlayContent is the open body overlay's floating-box content: the title
+// its border's top edge carries and its rendered body, or open=false when
+// the panes hold the body. One body overlay is ever open at a time — the
+// same invariant the key grammar keeps — so the first match wins. The body
+// is themed unmuted: the overlay is the focused surface, and only the panes
+// behind it recede.
+func (c compose) overlayContent() (title, content string, open bool) {
+	switch {
+	case c.helpOpen:
+		return "help", helpText, true
+	case c.exit != nil:
+		return "quit", c.exit.view(c.theme), true
+	case c.resultsOpen:
+		return "validate results", c.resultsView(), true
+	case c.pendingSwitch != nil:
+		return "version switch", c.pendingSwitch.view(), true
+	case c.versionList != nil:
+		return "versions", c.versionList.view(c.theme), true
+	case c.searchOpen:
+		return "search", c.search.view(c.theme), true
 	}
-	if c.resultsOpen {
-		return limitLines(clipLines(c.resultsView(), c.width), c.bodyHeight())
+	return "", "", false
+}
+
+// floatOverlay composites the titled overlay box over the muted panes with
+// lipgloss's Canvas/Layer compositor (ADR-0006: native compositing was a
+// driver of the v2 migration) — no hand-rolled ANSI splicing. The panes
+// render through the theme's Muted() variant, so the tree stays readable as
+// context but visibly recedes, and the box floats centered on top. Both
+// layer strings resolve their styles once, before the compositor runs, so
+// the per-cell composite never constructs a style (the render hot path's
+// one-resolution-per-frame invariant). Without a window size yet — no
+// geometry to center against — the box renders alone.
+func (c compose) floatOverlay(title, content string) string {
+	structure := c.theme.Structure()
+	height := c.bodyHeight()
+	if height <= 0 {
+		return floatingBox(title, content, structure, 0)
 	}
-	if c.pendingSwitch != nil {
-		return limitLines(clipLines(c.pendingSwitch.view(), c.width), c.bodyHeight())
-	}
-	if c.versionList != nil {
-		return limitLines(clipLines(c.versionList.view(c.theme), c.width), c.bodyHeight())
-	}
-	if c.searchOpen {
-		return limitLines(c.searchView(), c.bodyHeight())
+	width := c.width
+	if width <= 0 {
+		width = fallbackWidth
 	}
 
+	muted := c
+	muted.theme = c.theme.Muted()
+	background := muted.panesView()
+	box := floatingBox(title, limitLines(content, height-2), structure, width)
+
+	x := max((width-lipgloss.Width(box))/2, 0)
+	y := max((height-lipgloss.Height(box))/2, 0)
+
+	canvas := lipgloss.NewCanvas(width, height)
+	canvas.Compose(lipgloss.NewCompositor(
+		lipgloss.NewLayer(background),
+		lipgloss.NewLayer(box).X(x).Y(y).Z(1),
+	))
+	return canvas.Render()
+}
+
+// panesView renders the compose body's tree and detail panes side by side —
+// the tree alone when the terminal is too narrow for the detail. It is the
+// frame's body with no overlay open, and the backdrop the floating overlay
+// composites over once one is (floatOverlay), rendered through the Muted()
+// theme there.
+func (c compose) panesView() string {
 	treeWidth, detailWidth := c.paneWidths()
 	tree := c.treePane(treeWidth)
 	if detailWidth <= 0 {
@@ -1699,20 +1754,38 @@ func (c compose) bodyView() string {
 	)
 }
 
-// searchView renders the search overlay's lines, each clipped to the
-// terminal width.
-func (c compose) searchView() string {
-	return clipLines(c.search.view(c.theme), c.width)
-}
-
-// clipLines clips every line of rendered text to the given width,
-// ANSI-safely; zero width leaves them unbounded.
-func clipLines(text string, width int) string {
-	lines := strings.Split(text, "\n")
-	for index, line := range lines {
-		lines[index] = clipLine(line, width)
+// floatingBox frames content as a titled, bordered floating box in the
+// Structure token (DESIGN.md — Palette: overlay borders/titles ride
+// Structure): a titled top edge (┌─ title ─…┐), the content between vertical
+// edges, and a closing bottom edge. The border glyphs and the title carry
+// the one resolved Structure style; the content keeps whatever token styling
+// the overlay already painted onto it. maxWidth bounds the box to the
+// available body — zero leaves it unbounded, sized to its widest line.
+func floatingBox(title, content string, structure lipgloss.Style, maxWidth int) string {
+	lines := strings.Split(content, "\n")
+	inner := lipgloss.Width(title) + 4 // ┌─ title ─┐ needs the title plus a lead-in dash, two spaces, and a trailing dash
+	for _, line := range lines {
+		inner = max(inner, lipgloss.Width(line))
 	}
-	return strings.Join(lines, "\n")
+	if maxWidth > 2 {
+		inner = min(inner, maxWidth-2) // the two vertical edges
+	}
+
+	titleSegment := "─ " + title + " "
+	fill := max(inner-lipgloss.Width(titleSegment), 0)
+	top := structure.Render("┌" + titleSegment + strings.Repeat("─", fill) + "┐")
+	bottom := structure.Render("└" + strings.Repeat("─", inner) + "┘")
+
+	edge := structure.Render("│")
+	framed := make([]string, 0, len(lines)+2)
+	framed = append(framed, top)
+	for _, line := range lines {
+		clipped := clipLine(line, inner)
+		pad := max(inner-lipgloss.Width(clipped), 0)
+		framed = append(framed, edge+clipped+strings.Repeat(" ", pad)+edge)
+	}
+	framed = append(framed, bottom)
+	return strings.Join(framed, "\n")
 }
 
 // treeStyles is the tree pane's slice of the palette, resolved once per

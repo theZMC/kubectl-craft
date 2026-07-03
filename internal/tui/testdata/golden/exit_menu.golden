@@ -1,8 +1,30 @@
 craft.example.com/v1 Widget › spec.size
-quit composing — what happens to the Draft?
+  ▾ Widget                                size
+      apiVersion                          type: integer
+      kind                                required
+    ▸ metadata
+    ▾ spec                                documentation
+        paint                             Widget size; the same Field Path exists in v2, so a Draft
+>       size: 5                           value carries over on a version switch.
 
-> Emit & quit — emit the Manifest to stdout
-  Discard & quit — quit with nothing emitted
-  Cancel — keep composing
+
+
+                           ┌─ quit ─────────────────────────────────────┐
+                           │quit composing — what happens to the Draft? │
+                           │                                            │
+                           │> Emit & quit — emit the Manifest to stdout │
+                           │  Discard & quit — quit with nothing emitted│
+                           │  Cancel — keep composing                   │
+                           └────────────────────────────────────────────┘
+
+
+
+
+
+
+
+
+
+
 ✔ no required fields missing   Validate needs metadata.name
 ↑/↓ choose · enter confirm · esc cancel
