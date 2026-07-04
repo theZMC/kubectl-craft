@@ -49,6 +49,17 @@ mkdir -p "$scratch/bin"
 # Container/daemon arch: amd64 on CI, arm64 on Apple-silicon local. Match both
 # binaries to it so they run inside the container, not on the host.
 arch=$(docker version --format '{{.Server.Arch}}')
+# The dl.k8s.io kubectl URL below and Go's cross-build both only speak
+# amd64/arm64; any other daemon arch (386, arm, ppc64le, s390x) would 404 the
+# download or silently build the wrong binary. Reject it here with a clear
+# message instead of failing obscurely two steps later.
+case "$arch" in
+  amd64 | arm64) ;;
+  *)
+    echo "unsupported daemon arch '$arch': expected amd64 or arm64" >&2
+    exit 1
+    ;;
+esac
 
 # The tape invokes the plugin through kubectl's discovery convention: a
 # kubectl-craft binary on PATH. Cross-build it for the container.
@@ -57,8 +68,18 @@ GOOS=linux GOARCH="$arch" CGO_ENABLED=0 \
 
 # A matching linux kubectl (the tape Requires it). Pinned to an immutable,
 # per-version dl.k8s.io URL — reproducible, unlike the drifting conda closure.
-curl -fsSL -o "$scratch/bin/kubectl" \
-  "https://dl.k8s.io/release/${kubectl_version}/bin/linux/${arch}/kubectl"
+kubectl_url="https://dl.k8s.io/release/${kubectl_version}/bin/linux/${arch}/kubectl"
+curl -fsSL -o "$scratch/bin/kubectl" "$kubectl_url"
+# dl.k8s.io publishes a .sha256 next to each binary. Verify the download against
+# it before trusting the bytes on PATH — a corrupted or tampered kubectl would
+# otherwise silently drive the recording. shasum -a 256 is present on both the
+# darwin-local and ubuntu-CI hosts this runs on.
+expected_kubectl_sha=$(curl -fsSL "${kubectl_url}.sha256")
+actual_kubectl_sha=$(shasum -a 256 "$scratch/bin/kubectl" | cut -d ' ' -f 1)
+if [ "$expected_kubectl_sha" != "$actual_kubectl_sha" ]; then
+  echo "kubectl checksum mismatch: expected $expected_kubectl_sha, got $actual_kubectl_sha" >&2
+  exit 1
+fi
 chmod +x "$scratch/bin/kubectl"
 
 # k3d hands out a host-loopback server URL that another container can't reach.

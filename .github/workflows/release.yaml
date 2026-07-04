@@ -14,6 +14,11 @@ on:
     - .goreleaser.yaml
     - .mise/config.toml
     - .github/workflows/release.yaml
+    # The snapshot job renders the demo GIF, so the render pipeline's own
+    # sources are build-relevant: a broken render task or tape must fail the
+    # PR here, not first surface on the tag-push release.
+    - .mise/tasks/demo/**
+    - demo.tape
 
 permissions:
   contents: read

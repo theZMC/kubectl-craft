@@ -45,9 +45,11 @@ is published as a release asset rather than committed (it outweighs the repo's
 large-file cap); the release workflow re-renders it from the tape on every tag,
 so the recording above is exactly as fresh as the release it shipped with.
 
-The signature loop it records: pick a Kind, `/`-search a Field Path, fill
-values, `v` Validate (a CEL violation marks the offending tree node), `n` jump
-to the finding, fix it, revalidate to a clean pass, `ctrl+d` Emit.
+The signature loop it records: pick a Kind, `/`-search a Field Path (a floating
+overlay over the dimmed compose view), fill values, `v` Validate (a CEL
+violation paints the offending tree node), `n` jump to the finding, fix it,
+revalidate to a clean pass, `ctrl+d` Emit. The chrome bar and detail-pane
+section headers carry the palette's semantic accents throughout.
 
 ## Install
 
